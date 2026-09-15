@@ -1,0 +1,153 @@
+<!doctype html>
+<html lang="ms">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Aduan System — Colour Palette Preview</title>
+<style>
+  :root {
+    --primary: #1E3A5F;
+    --secondary: #3F6B6E;
+    --ink: #23272B;
+    --bg: #F6F5F2;
+    --border: #D8D6D0;
+    --accent: #B8863C;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    padding: 32px 20px 48px;
+    background: var(--bg);
+    color: var(--ink);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  }
+  h1 { font-size: 1.3rem; margin: 0 0 4px; color: var(--primary); }
+  .sub { color: #6b6f73; font-size: 0.85rem; margin: 0 0 28px; }
+  h2 { font-size: 1rem; margin: 32px 0 12px; color: var(--primary); border-bottom: 1px solid var(--border); padding-bottom: 6px; }
+
+  .swatches {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+    gap: 12px;
+    max-width: 900px;
+  }
+  .swatch {
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    overflow: hidden;
+    background: #fff;
+  }
+  .swatch-color { height: 70px; }
+  .swatch-label { padding: 8px 10px; font-size: 0.75rem; }
+  .swatch-label .name { font-weight: 600; display: block; }
+  .swatch-label .hex { color: #6b6f73; font-family: ui-monospace, monospace; }
+
+  .card {
+    max-width: 900px;
+    background: #fff;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 20px 22px;
+    margin-bottom: 8px;
+  }
+  .btn-row { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 10px; }
+  .btn {
+    padding: 9px 16px;
+    border-radius: 6px;
+    font-size: 0.85rem;
+    font-weight: 600;
+    border: 1px solid transparent;
+    cursor: default;
+  }
+  .btn-primary { background: var(--primary); color: #fff; }
+  .btn-secondary { background: #fff; color: var(--secondary); border-color: var(--secondary); }
+  .btn-accent { background: var(--accent); color: #fff; }
+
+  .badges { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 10px; }
+  .badge {
+    display: inline-flex;
+    align-items: center;
+    padding: 5px 12px;
+    border-radius: 999px;
+    font-size: 0.78rem;
+    font-weight: 600;
+  }
+  .badge-baru       { background: #E7E7E4; color: #55575B; }
+  .badge-menunggu   { background: #DCE8F0; color: #1E3A5F; }
+  .badge-tindakan   { background: #F3E6CC; color: #8A6414; }
+  .badge-selesai    { background: #DCEAE1; color: #2F6B4F; }
+  .badge-nfa        { background: #E3E6E8; color: #4A5560; }
+
+  table { border-collapse: collapse; width: 100%; margin-top: 10px; font-size: 0.85rem; }
+  th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--border); }
+  th { color: #6b6f73; font-weight: 600; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.03em; }
+
+  @media (prefers-color-scheme: dark) {
+    body { background: #17191b; color: #e7e7e4; }
+    .card, .swatch { background: #1f2224; border-color: #33373a; }
+    th, td { border-color: #33373a; }
+    .sub, .hex, th { color: #9aa0a5; }
+  }
+</style>
+</head>
+<body>
+  <h1>Sistem Pengurusan Aduan — Colour Palette</h1>
+  <p class="sub">Trustworthy, neutral, calm. Proposed base palette + status badge convention.</p>
+
+  <h2>Core Palette</h2>
+  <div class="swatches">
+    <div class="swatch">
+      <div class="swatch-color" style="background:#1E3A5F"></div>
+      <div class="swatch-label"><span class="name">Primary — Deep Navy</span><span class="hex">#1E3A5F</span></div>
+    </div>
+    <div class="swatch">
+      <div class="swatch-color" style="background:#3F6B6E"></div>
+      <div class="swatch-label"><span class="name">Secondary — Slate Teal</span><span class="hex">#3F6B6E</span></div>
+    </div>
+    <div class="swatch">
+      <div class="swatch-color" style="background:#B8863C"></div>
+      <div class="swatch-label"><span class="name">Accent — Muted Gold</span><span class="hex">#B8863C</span></div>
+    </div>
+    <div class="swatch">
+      <div class="swatch-color" style="background:#23272B"></div>
+      <div class="swatch-label"><span class="name">Ink — Text</span><span class="hex">#23272B</span></div>
+    </div>
+    <div class="swatch">
+      <div class="swatch-color" style="background:#F6F5F2; border-bottom:1px solid #D8D6D0"></div>
+      <div class="swatch-label"><span class="name">Background — Warm Off-White</span><span class="hex">#F6F5F2</span></div>
+    </div>
+    <div class="swatch">
+      <div class="swatch-color" style="background:#D8D6D0"></div>
+      <div class="swatch-label"><span class="name">Border / Divider</span><span class="hex">#D8D6D0</span></div>
+    </div>
+  </div>
+
+  <h2>Buttons &amp; Tone</h2>
+  <div class="card">
+    <div class="btn-row">
+      <span class="btn btn-primary">Hantar Aduan</span>
+      <span class="btn btn-secondary">Lihat Butiran</span>
+      <span class="btn btn-accent">Rujuk SPRM</span>
+    </div>
+  </div>
+
+  <h2>Status Badge Convention</h2>
+  <div class="card">
+    <div class="badges">
+      <span class="badge badge-baru">Baru</span>
+      <span class="badge badge-menunggu">Menunggu JMM</span>
+      <span class="badge badge-tindakan">Dalam Tindakan</span>
+      <span class="badge badge-selesai">Selesai</span>
+      <span class="badge badge-nfa">NFA</span>
+    </div>
+    <table>
+      <tr><th>Status</th><th>Meaning</th><th>Colour logic</th></tr>
+      <tr><td>Baru</td><td>Received, not yet triaged</td><td>Neutral grey — no signal yet</td></tr>
+      <tr><td>Menunggu JMM</td><td>Awaiting committee decision</td><td>Primary navy tint — "in the pipeline"</td></tr>
+      <tr><td>Dalam Tindakan</td><td>Actively being worked</td><td>Muted gold — active, not alarming</td></tr>
+      <tr><td>Selesai</td><td>Resolved / closed with action</td><td>Muted green — calm resolution</td></tr>
+      <tr><td>NFA</td><td>Closed without further action</td><td>Cool grey-blue — closed, deliberately neutral (not "success")</td></tr>
+    </table>
+  </div>
+</body>
+</html>
