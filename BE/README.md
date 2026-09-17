@@ -1,6 +1,6 @@
 # BE — Sistem Aduan Integriti API
 
-Express 5 + TypeScript + PostgreSQL (`pg`, plain SQL, no ORM). Serves the frontend in [`../FE`](../FE).
+Express 5 + TypeScript + PostgreSQL (`pg`, plain SQL, no ORM). Serves the frontend in [`../FE`](../FE). Step-by-step install for both apps: [`../RUN-LOCALLY.md`](../RUN-LOCALLY.md).
 
 Read [`../CLAUDE.md`](../CLAUDE.md) before changing anything here — §6 lists the business rules this API enforces, and where; §8 lists the product decisions behind migrations 004+.
 
@@ -55,7 +55,7 @@ What you get, all fictional and all created through the real query functions (so
 - **Meetings:** `JMM Bil. 1/2026` (Selesai, 12 decided items) and `JMM Bil. 2/2026` (Dijadualkan, 5 items waiting).
 - **Decisions:** fully signed, chair-only, and unsigned — NFA ones included.
 - **Case actions** referred to KJ (5) and SUB_UNIT (2). One KJ referral is on a case later decided NFA, so the KJ inbox shows 4.
-- **Complainants:** identified `pengadu.demo@contoh.my` (5 complaints, one NFA and so hidden from them) and anonymous `tanpa.nama.demo@contoh.my` (2). Sign in on the portal with the email; the OTP code prints in the `npm run dev` console.
+- **Complainants:** identified `pengadu.demo@contoh.my` (5 complaints, one NFA and so hidden from them) and anonymous `tanpa.nama.demo@contoh.my` (2). Sign in at `http://localhost:3000/me` with the email; the OTP code prints in the `npm run dev` console under `Kod log masuk anda:`. `pengadu.demo` has one request pending (UI/2026/00001), so the protection form offers only their other complaints.
 - **Protection requests:** one each Diterima, Diluluskan, Ditolak.
 
 **Already set up by hand** (the old `psql -f` steps)? `db:migrate` will refuse, because it can't tell which files were applied. Either run `npm run db:reset` (deletes local data) or adopt the database without losing data:
@@ -98,7 +98,7 @@ npm run db:migrate -- --baseline 003   # marks schema.sql + 001–003 as applied
 | Method | Path | Does |
 | --- | --- | --- |
 | `GET` | `/api/health` | Liveness + DB round trip |
-| `POST` | `/api/complaints` | File a complaint. Requires `complainant` (named: `particulars`; anonymous: `isAnonymous: true` + `contactEmail`, no `particulars`) and `disclaimerAcknowledged: true`. Emails an acknowledgement when `contactEmail` is given. 409 with a *count* of possible duplicates unless `duplicateCheckAcknowledged: true` |
+| `POST` | `/api/complaints` | File a complaint. Accepts only `caseDescription`, `accusedParticulars`, `accusedDepartment`, `integrityCategory`, `complaintDate` plus the complainant block; filed as channel `SAI`, received today (Malaysia time). Requires `complainant` (named: `particulars`; anonymous: `isAnonymous: true` + `contactEmail`, no `particulars`) and `disclaimerAcknowledged: true`. Emails an acknowledgement when `contactEmail` is given. 409 with a *count* of possible duplicates unless `duplicateCheckAcknowledged: true` |
 | `GET` | `/api/complaints/:refNo` | Track by reference number. Returns a narrow, public-safe shape |
 
 ### Complainant — email OTP (cookie `aduan_csid`)
@@ -133,7 +133,7 @@ All gated on `INTEGRITY_UNIT_ROLES` (protection requests: KUI only; staff: ADMIN
 
 | Method | Path | Does |
 | --- | --- | --- |
-| `GET` | `/api/admin/complaints` | List with filters (`status`, `reportYear`, `reportMonth`, `integrityCategory`, `sourceChannel`, `sector`, `limit`, `offset`) |
+| `GET` | `/api/admin/complaints` | List with filters (`status`, `reportYear`, `reportMonth`, `integrityCategory`, `sourceChannel`, `sector`, `from`/`to`, `limit`, `offset`). `from`/`to` bound the received date, else complaint date, else registration day — the same period date `/api/admin/stats` uses |
 | `POST` | `/api/admin/complaints` | Register. 409 with the candidate records unless acknowledged |
 | `POST` | `/api/admin/complaints/duplicate-candidates` | Run the duplicate check on its own |
 | `GET` | `/api/admin/complaints/:id` | Full case file: complaint + decisions + signatories + quorum + actions |
@@ -146,6 +146,7 @@ All gated on `INTEGRITY_UNIT_ROLES` (protection requests: KUI only; staff: ADMIN
 | `POST` | `/api/admin/decisions/:id/sign` | Sign one slot. 409 once the decision is locked |
 | `PUT` | `/api/admin/decisions/:id/meeting` | `{ meetingId }` links (or `null` unlinks). Complaint must be on that agenda; 409 once locked |
 | `PATCH` | `/api/admin/case-actions/:id` | Update an action |
+| `GET` | `/api/admin/case-actions/assignees` | KJ / SUB_UNIT accounts for the referral picker: `id`, `fullName`, `role`, `isActive` (no email) |
 | `PUT` | `/api/admin/case-actions/:id/assignee` | `{ staffId }` refers the action to an active KJ/SUB_UNIT (`null` clears). 422 for any other account; 409 on an NFA complaint |
 | `GET` | `/api/admin/jmm/meetings` | List. Filters: `status`, `from`/`to` (meeting date), `limit`, `offset` |
 | `POST` | `/api/admin/jmm/meetings` | Create `{ meetingNo, meetingDate, venue? }`. 409 on a duplicate `meetingNo` |

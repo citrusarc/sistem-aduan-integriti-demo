@@ -10,6 +10,7 @@ import {
   getPubliclyDisclosableComplaintByRefNo,
 } from "../db/queries/complaints.js";
 import { toPublicComplaint } from "../db/mappers.js";
+import { malaysiaToday } from "../db/reportPeriod.js";
 
 /**
  * PUBLIC portal API. Business rule 9: nothing from `jmm_decisions`, and no
@@ -41,6 +42,8 @@ publicComplaintsRouter.post("/", async (req, res) => {
     const candidates = await findDuplicateCandidates({
       accusedParticulars: body.accusedParticulars,
       accusedDepartment: body.accusedDepartment,
+      accused2Particulars: body.accused2Particulars,
+      accused2Department: body.accused2Department,
       caseDescription: body.caseDescription,
       excludeNfa: true,
     });
@@ -60,8 +63,19 @@ publicComplaintsRouter.post("/", async (req, res) => {
     }
   }
 
+  // The portal is the "Sistem Aduan Integriti" channel on both the Masterlist
+  // and the Lampiran 2 lists, and a submission reaches the unit the moment
+  // it's made — so it's dated, received and filed under today. When the
+  // incident happened is the complainant's own `incidentDate`.
+  const today = malaysiaToday();
   const complaint = await createComplaint({
     ...body,
+    sourceChannel: "SAI",
+    receivedVia: "SISTEM_ADUAN_INTEGRITI",
+    complaintDate: today.date,
+    receivedDateUi: today.date,
+    reportYear: today.reportYear,
+    reportMonth: today.reportMonth,
     disclaimerAcknowledged: true,
   });
 

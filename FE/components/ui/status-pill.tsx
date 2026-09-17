@@ -1,5 +1,5 @@
-import { COMPLAINT_STATUS, type ComplaintStatus } from "@/types/enums";
-import { cn } from "@/lib/utils";
+import { COMPLAINT_STATUS, type ComplaintStatus } from "@/types/enums"
+import { cn } from "@/lib/utils"
 
 /**
  * Status badge convention, per the agreed palette:
@@ -21,13 +21,13 @@ const STATUS_CLASSES: Record<ComplaintStatus, string> = {
     "bg-status-dalam-tindakan text-status-dalam-tindakan-foreground",
   SELESAI: "bg-status-selesai text-status-selesai-foreground",
   NFA: "bg-status-nfa text-status-nfa-foreground",
-};
+}
 
 export type StatusPillProps = {
   /** The stored `complaints.status` from the API — see CLAUDE.md §4. */
-  status: ComplaintStatus;
-  className?: string;
-};
+  status: ComplaintStatus
+  className?: string
+}
 
 export function StatusPill({ status, className }: StatusPillProps) {
   return (
@@ -35,10 +35,10 @@ export function StatusPill({ status, className }: StatusPillProps) {
       className={cn(
         "inline-flex items-center gap-1 rounded-full px-3 py-1 text-xs font-semibold",
         STATUS_CLASSES[status],
-        className,
+        className
       )}
     >
       {COMPLAINT_STATUS[status]}
     </span>
-  );
+  )
 }

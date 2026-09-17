@@ -160,6 +160,34 @@ describe("referring actions (Integrity Unit)", () => {
     );
     assert.equal((await assign(action.id, inactiveKj.id)).status, 422);
 
+    // The picker: KJ / SUB_UNIT only, inactive flagged, no email; IU only.
+    const recipients = expectStatus<Record<string, unknown>[]>(
+      await kui.get("/admin/case-actions/assignees"),
+      200,
+    );
+    assert.deepEqual(
+      new Set(recipients.map((r) => r.role)),
+      new Set(["KJ", "SUB_UNIT"]),
+    );
+    for (const r of recipients) {
+      assert.deepEqual(Object.keys(r).sort(), [
+        "fullName",
+        "id",
+        "isActive",
+        "role",
+      ]);
+    }
+    assert.equal(
+      recipients.find((r) => r.id === inactiveKj.id)?.isActive,
+      false,
+    );
+    for (const client of [kj, subUnit]) {
+      assert.equal(
+        (await client.get("/admin/case-actions/assignees")).status,
+        403,
+      );
+    }
+
     const cleared = expectStatus(await assign(action.id, null), 200);
     assert.equal(cleared.assignedToStaffId, null);
 

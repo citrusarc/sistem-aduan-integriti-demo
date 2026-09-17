@@ -86,6 +86,14 @@ complainantRouter.post("/auth/request-code", async (req, res) => {
     }).catch((err: unknown) => {
       console.error("Gagal menghantar kod log masuk:", err);
     });
+  } else if (!config.isProduction) {
+    // The response is identical either way (it must not reveal who has filed
+    // complaints), so locally say on the server side why no code was printed.
+    console.log(
+      result.reason === "throttled"
+        ? `[OTP] Tiada kod untuk ${email}: had dicapai (${policy.cooldownSeconds} s antara kod, ${policy.maxPerHour} sejam).`
+        : `[OTP] Tiada kod untuk ${email}: tiada aduan yang boleh didedahkan dikaitkan dengan e-mel ini.`,
+    );
   }
 
   res.status(202).json({ data: { message: CODE_REQUESTED } });

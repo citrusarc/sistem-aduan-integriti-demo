@@ -4,7 +4,8 @@ import type { GradeLevelGroup } from "../../types/enums.js";
 
 const COMPLAINANT_COLUMNS = `
   id, particulars, grade_level, contact_email, contact_phone, is_anonymous,
-  created_at
+  complainant_category, ic_no, passport_no, age, gender, race, nationality,
+  contact_phone_2, postal_address, occupation, employer, created_at
 `;
 
 export async function getComplainantById(

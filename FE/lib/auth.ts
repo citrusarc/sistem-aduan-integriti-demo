@@ -9,6 +9,9 @@ import type { StaffRole } from "@/types/enums"
  * request; hiding a link does not protect the data behind it.
  */
 
+/** Mirrors MIN_PASSWORD_LENGTH in BE/src/auth/password.ts; BE enforces it. */
+export const MIN_PASSWORD_LENGTH = 12
+
 export type CurrentStaff = {
   id: string
   email: string
@@ -21,7 +24,7 @@ export type CurrentStaff = {
 export async function login(email: string, password: string) {
   return api<CurrentStaff & { sessionExpiresAt: string }>("/auth/login", {
     method: "POST",
-    body: JSON.stringify({ email, password }),
+    json: { email, password },
   })
 }
 
@@ -45,6 +48,6 @@ export async function changePassword(
 ): Promise<void> {
   await api<void>("/auth/password", {
     method: "POST",
-    body: JSON.stringify({ currentPassword, newPassword }),
+    json: { currentPassword, newPassword },
   })
 }

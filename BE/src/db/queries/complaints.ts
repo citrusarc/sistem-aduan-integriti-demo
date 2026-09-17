@@ -2,16 +2,30 @@ import type { PoolClient } from "pg";
 import { query, queryOne, withTransaction } from "../client.js";
 import { transition, type StatusEvent } from "../complaintStatus.js";
 import { DomainError } from "../errors.js";
+import { malaysiaToday } from "../reportPeriod.js";
 import type { ComplaintRow } from "../../types/entities.js";
 import type { ComplaintStatus } from "../../types/enums.js";
 
 const COMPLAINT_COLUMNS = `
   id, seq_no, report_month, report_year, directed_to, complaint_ref_no,
   complainant_id, source_channel, accused_particulars, accused_grade_level,
-  accused_department, info_classification, integrity_category, sector,
-  case_description, complaint_date, received_date_ui, status,
-  status_changed_at, disclaimer_acknowledged_at, created_at, updated_at
+  accused_department, accused_position, accused2_particulars,
+  accused2_department, accused2_position, info_classification,
+  integrity_category, sector, case_description, complaint_date,
+  received_date_ui, incident_date, incident_time, has_supporting_documents,
+  received_via, status, status_changed_at, disclaimer_acknowledged_at,
+  created_at, updated_at
 `;
+
+/**
+ * A complaint's period date: its `received_date_ui` (TARIKH TERIMA DI UI),
+ * falling back to `complaint_date`, then the day it was registered here. The
+ * masterlist's own `report_month` is free text with no fixed format, so it
+ * can't be grouped or filtered reliably. Stats and the register's period filter
+ * share this one definition, so a month's count and its list always agree.
+ */
+export const PERIOD_DATE_SQL =
+  "COALESCE(received_date_ui, complaint_date, (created_at AT TIME ZONE 'Asia/Kuala_Lumpur')::date)";
 
 export type ComplaintFilters = {
   reportYear?: number;
@@ -20,6 +34,9 @@ export type ComplaintFilters = {
   sourceChannel?: string;
   sector?: string;
   status?: ComplaintStatus;
+  /** Inclusive 'YYYY-MM-DD' bounds on PERIOD_DATE_SQL. */
+  from?: string;
+  to?: string;
   limit?: number;
   offset?: number;
 };
@@ -52,6 +69,12 @@ export async function listComplaints(
   }
   if (filters.status !== undefined) {
     add("status = $?", filters.status);
+  }
+  if (filters.from !== undefined) {
+    add(`${PERIOD_DATE_SQL} >= $?::date`, filters.from);
+  }
+  if (filters.to !== undefined) {
+    add(`${PERIOD_DATE_SQL} <= $?::date`, filters.to);
   }
 
   const where = conditions.length ? `WHERE ${conditions.join(" AND ")}` : "";
@@ -168,11 +191,15 @@ export async function getDisclosableComplaintForEmail(
  * Deliberately recall-biased: it is cheap for staff to dismiss a false match
  * and expensive to register a repeat complaint as a brand-new case. Matches on
  * the same accused party, or on a strongly overlapping case description, within
- * a rolling window.
+ * a rolling window. Lampiran 2 names up to two accused people; each name given
+ * is matched against both accused slots of existing cases, since the same
+ * person can be listed first on one form and second on another.
  */
 export async function findDuplicateCandidates(input: {
   accusedParticulars?: string | null;
   accusedDepartment?: string | null;
+  accused2Particulars?: string | null;
+  accused2Department?: string | null;
   caseDescription?: string | null;
   withinDays?: number;
   /**
@@ -185,14 +212,28 @@ export async function findDuplicateCandidates(input: {
   const result = await query<ComplaintRow>(
     `SELECT ${COMPLAINT_COLUMNS}
        FROM complaints c
-      WHERE c.received_date_ui >= CURRENT_DATE - ($4::int * INTERVAL '1 day')
+      -- Period date, not received_date_ui alone: a complaint without a received
+      -- date must still be found as a possible repeat.
+      WHERE ${PERIOD_DATE_SQL} >= CURRENT_DATE - ($4::int * INTERVAL '1 day')
         AND (
-              ($1::text IS NOT NULL AND c.accused_particulars ILIKE '%' || $1 || '%')
-           OR ($2::text IS NOT NULL AND c.accused_department  ILIKE '%' || $2 || '%')
+              EXISTS (
+                SELECT 1
+                  FROM unnest(ARRAY[$1::text, $6::text]) AS given(name)
+                 WHERE given.name IS NOT NULL
+                   AND (c.accused_particulars  ILIKE '%' || given.name || '%'
+                     OR c.accused2_particulars ILIKE '%' || given.name || '%')
+              )
+           OR EXISTS (
+                SELECT 1
+                  FROM unnest(ARRAY[$2::text, $7::text]) AS given(dept)
+                 WHERE given.dept IS NOT NULL
+                   AND (c.accused_department  ILIKE '%' || given.dept || '%'
+                     OR c.accused2_department ILIKE '%' || given.dept || '%')
+              )
            OR ($3::text IS NOT NULL AND similarity(c.case_description, $3) > 0.45)
         )
         AND (NOT $5::boolean OR ${PUBLICLY_DISCLOSABLE_SQL})
-      ORDER BY c.received_date_ui DESC
+      ORDER BY ${PERIOD_DATE_SQL} DESC, c.id DESC
       LIMIT 20`,
     [
       input.accusedParticulars ?? null,
@@ -200,6 +241,8 @@ export async function findDuplicateCandidates(input: {
       input.caseDescription ?? null,
       input.withinDays ?? 365,
       input.excludeNfa ?? false,
+      input.accused2Particulars ?? null,
+      input.accused2Department ?? null,
     ],
   );
   return result.rows;
@@ -212,6 +255,12 @@ export async function findDuplicateCandidates(input: {
  * as an updatable field. Format: UI/<year>/<zero-padded sequence within year>.
  */
 async function nextRefNo(client: PoolClient, year: number): Promise<string> {
+  // Concurrent registrations would otherwise read the same MAX(seq_no) and all
+  // but one fail on the unique index. The lock is per year and released at
+  // commit, so numbering stays gap-free and nobody gets a 500.
+  await client.query("SELECT pg_advisory_xact_lock(hashtext($1))", [
+    `complaint_ref_no:${year}`,
+  ]);
   const result = await client.query<{ next_seq: string }>(
     `SELECT COALESCE(MAX(seq_no), 0) + 1 AS next_seq
        FROM complaints
@@ -230,12 +279,20 @@ export type CreateComplaintInput = {
   accusedParticulars?: string | null;
   accusedGradeLevel?: string | null;
   accusedDepartment?: string | null;
+  accusedPosition?: string | null;
+  accused2Particulars?: string | null;
+  accused2Department?: string | null;
+  accused2Position?: string | null;
   infoClassification?: string | null;
   integrityCategory?: string | null;
   sector?: string | null;
   caseDescription?: string | null;
   complaintDate?: string | null;
   receivedDateUi?: string | null;
+  incidentDate?: string | null;
+  incidentTime?: string | null;
+  hasSupportingDocuments?: boolean | null;
+  receivedVia?: string | null;
   complainant?: {
     particulars?: string | null;
     gradeLevel?: string | null;
@@ -244,6 +301,18 @@ export type CreateComplaintInput = {
     /** Stored for staff to call by hand; nothing sends to it (rule 10). */
     contactPhone?: string | null;
     isAnonymous?: boolean;
+    complainantCategory?: string | null;
+    icNo?: string | null;
+    passportNo?: string | null;
+    age?: number | null;
+    gender?: string | null;
+    race?: string | null;
+    nationality?: string | null;
+    /** As contactPhone: staff call it by hand, nothing sends to it. */
+    contactPhone2?: string | null;
+    postalAddress?: string | null;
+    occupation?: string | null;
+    employer?: string | null;
   } | null;
   /** Portal submissions: the handling disclaimer was acknowledged just now. */
   disclaimerAcknowledged?: boolean;
@@ -262,28 +331,44 @@ export async function createComplaint(
     let complainantId: string | null = null;
 
     if (input.complainant) {
+      const p = input.complainant;
+      // Validation refuses identifying fields on an anonymous submission; this
+      // nulls them again so nothing identifying is stored even if a caller
+      // skipped validation. The check constraints (006, 010) are the backstop.
+      const identifying = <T>(value: T | null | undefined) =>
+        p.isAnonymous ? null : (value ?? null);
       const inserted = await client.query<{ id: string }>(
-        // Anonymous rows keep no particulars; the check constraint from
-        // migration 006 refuses one that tries.
         `INSERT INTO complainants (
-           particulars, grade_level, contact_email, contact_phone, is_anonymous
+           particulars, grade_level, contact_email, contact_phone, is_anonymous,
+           complainant_category, ic_no, passport_no, age, gender, race,
+           nationality, contact_phone_2, postal_address, occupation, employer
          )
-         VALUES ($1, $2, $3, $4, $5)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)
          RETURNING id`,
         [
-          input.complainant.isAnonymous
-            ? null
-            : (input.complainant.particulars ?? null),
-          input.complainant.gradeLevel ?? null,
-          input.complainant.contactEmail ?? null,
-          input.complainant.contactPhone ?? null,
-          input.complainant.isAnonymous ?? false,
+          identifying(p.particulars),
+          p.gradeLevel ?? null,
+          p.contactEmail ?? null,
+          p.contactPhone ?? null,
+          p.isAnonymous ?? false,
+          p.complainantCategory ?? null,
+          identifying(p.icNo),
+          identifying(p.passportNo),
+          identifying(p.age),
+          identifying(p.gender),
+          identifying(p.race),
+          identifying(p.nationality),
+          p.contactPhone2 ?? null,
+          identifying(p.postalAddress),
+          identifying(p.occupation),
+          identifying(p.employer),
         ],
       );
       complainantId = inserted.rows[0]?.id ?? null;
     }
 
-    const year = input.reportYear ?? new Date().getFullYear();
+    // Default to the year in Malaysia, not the server's clock.
+    const year = input.reportYear ?? malaysiaToday().reportYear;
     const refNo = await nextRefNo(client, year);
     const seqNo = Number(refNo.slice(refNo.lastIndexOf("/") + 1));
 
@@ -293,12 +378,16 @@ export async function createComplaint(
          complainant_id, source_channel, accused_particulars,
          accused_grade_level, accused_department, info_classification,
          integrity_category, sector, case_description, complaint_date,
-         received_date_ui, status, disclaimer_acknowledged_at
+         received_date_ui, status, disclaimer_acknowledged_at,
+         accused_position, accused2_particulars, accused2_department,
+         accused2_position, incident_date, incident_time,
+         has_supporting_documents, received_via
        )
        -- §8 decision 1: a new complaint is BARU, written explicitly rather
        -- than left to the column default.
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,'BARU',
-               CASE WHEN $17::boolean THEN now() END)
+               CASE WHEN $17::boolean THEN now() END,
+               $18,$19,$20,$21,$22,$23,$24,$25)
        RETURNING ${COMPLAINT_COLUMNS}`,
       [
         seqNo,
@@ -318,6 +407,14 @@ export async function createComplaint(
         input.complaintDate ?? null,
         input.receivedDateUi ?? null,
         input.disclaimerAcknowledged ?? false,
+        input.accusedPosition ?? null,
+        input.accused2Particulars ?? null,
+        input.accused2Department ?? null,
+        input.accused2Position ?? null,
+        input.incidentDate ?? null,
+        input.incidentTime ?? null,
+        input.hasSupportingDocuments ?? null,
+        input.receivedVia ?? null,
       ],
     );
 
@@ -340,12 +437,20 @@ const UPDATABLE_COLUMNS = {
   accusedParticulars: "accused_particulars",
   accusedGradeLevel: "accused_grade_level",
   accusedDepartment: "accused_department",
+  accusedPosition: "accused_position",
+  accused2Particulars: "accused2_particulars",
+  accused2Department: "accused2_department",
+  accused2Position: "accused2_position",
   infoClassification: "info_classification",
   integrityCategory: "integrity_category",
   sector: "sector",
   caseDescription: "case_description",
   complaintDate: "complaint_date",
   receivedDateUi: "received_date_ui",
+  incidentDate: "incident_date",
+  incidentTime: "incident_time",
+  hasSupportingDocuments: "has_supporting_documents",
+  receivedVia: "received_via",
 } as const;
 
 export type UpdateComplaintInput = Partial<

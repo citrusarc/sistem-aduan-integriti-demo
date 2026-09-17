@@ -618,6 +618,37 @@ describe("decisions", () => {
     );
   });
 
+  it("a slot can only be signed through its own decision", async () => {
+    const a = expectStatus<Decision>(
+      await decide((await newComplaint()).id, "TINDAKAN_SPRM"),
+      201,
+    );
+    const b = expectStatus<Decision>(
+      await decide((await newComplaint()).id, "TINDAKAN_SPRM"),
+      201,
+    );
+
+    // b's slot through a's URL: refused, and b's slot stays unsigned.
+    expectRefused(
+      await kui.post(`/admin/decisions/${a.id}/sign`, {
+        signatoryId: b.signatories[0]!.id,
+      }),
+      409,
+    );
+    const { rows } = await ctx.sql<{ n: number }>(
+      "SELECT count(*)::int AS n FROM jmm_decision_signatories WHERE jmm_decision_id = $1 AND signed_at IS NOT NULL",
+      [b.id],
+    );
+    assert.equal(rows[0]!.n, 0);
+
+    expectStatus(
+      await kui.post(`/admin/decisions/${b.id}/sign`, {
+        signatoryId: b.signatories[0]!.id,
+      }),
+      200,
+    );
+  });
+
   it("decision log filters by outcome, date range, and meeting", async () => {
     const m = await newMeeting();
     const a = await newComplaint();
@@ -674,6 +705,175 @@ describe("decisions", () => {
   });
 });
 
+describe("reference numbers", () => {
+  it("concurrent registrations all succeed with distinct, consecutive numbers", async () => {
+    const results = await Promise.all(
+      Array.from({ length: 12 }, (_, i) =>
+        (i % 2 ? kui : ctx.anonymous).post<Complaint>(
+          i % 2 ? "/admin/complaints" : "/complaints",
+          {
+            caseDescription: `Aduan serentak ${i} ${"r".repeat(i * 5)} ${seq++}`,
+            complainant: {
+              isAnonymous: true,
+              contactEmail: `serentak${i}@ujian.my`,
+            },
+            disclaimerAcknowledged: true,
+            duplicateCheckAcknowledged: true,
+          },
+        ),
+      ),
+    );
+    const refs = results.map(
+      (r) => expectStatus<Complaint>(r, 201).complaintRefNo,
+    );
+    assert.equal(new Set(refs).size, refs.length);
+  });
+
+  it("a portal submission is filed as SAI, received today, and can't set the unit's own fields", async () => {
+    const created = expectStatus<{ complaintRefNo: string }>(
+      await ctx.anonymous.post("/complaints", {
+        caseDescription: `Aduan portal medan dalaman ${seq++} ${"p".repeat(seq)}`,
+        complainant: { particulars: "Pengadu Portal" },
+        disclaimerAcknowledged: true,
+        duplicateCheckAcknowledged: true,
+        // None of these may be chosen by the public:
+        sourceChannel: "EMEL",
+        receivedVia: "EMEL_FAKSIMILI",
+        complaintDate: "2020-01-01",
+        receivedDateUi: "2020-01-01",
+        reportYear: 2020,
+        reportMonth: "JANUARI",
+        sector: "PEROLEHAN",
+        infoClassification: "JENAYAH",
+        directedTo: "AGENSI",
+      }),
+      201,
+    );
+    const { rows } = await ctx.sql<Record<string, string | number | null>>(
+      `SELECT source_channel::text, received_via::text, complaint_date,
+              received_date_ui, report_year, report_month,
+              sector::text, info_classification::text, directed_to::text,
+              to_char(now() AT TIME ZONE 'Asia/Kuala_Lumpur', 'YYYY-MM-DD') AS today
+         FROM complaints WHERE complaint_ref_no = $1`,
+      [created.complaintRefNo],
+    );
+    const row = rows[0]!;
+    assert.equal(row.source_channel, "SAI");
+    assert.equal(row.received_via, "SISTEM_ADUAN_INTEGRITI");
+    assert.equal(row.complaint_date, row.today);
+    assert.equal(row.received_date_ui, row.today);
+    assert.equal(row.report_year, Number(String(row.today).slice(0, 4)));
+    assert.notEqual(row.report_month, null);
+    assert.deepEqual(
+      [row.sector, row.info_classification, row.directed_to],
+      [null, null, null],
+    );
+  });
+});
+
+describe("BORANG ADUAN/ MAKLUMAT (Lampiran 2)", () => {
+  it("staff registration stores every form field and the case file returns them", async () => {
+    const created = await newComplaint({
+      receivedVia: "SURAT_LAYANG",
+      accusedParticulars: "Pegawai Lampiran Satu",
+      accusedDepartment: "Bahagian Pertama",
+      accusedPosition: "Penolong Pegawai",
+      accused2Particulars: "Pegawai Lampiran Dua",
+      accused2Department: "Syarikat Kedua Sdn Bhd",
+      accused2Position: "Pengurus",
+      incidentDate: "2026-02-14",
+      incidentTime: "14:30",
+      hasSupportingDocuments: true,
+      complainant: {
+        complainantCategory: "ORANG_AWAM",
+        particulars: "Pengadu Lampiran",
+        icNo: "900101-14-5678",
+        passportNo: "a1234567",
+        age: 36,
+        gender: "PEREMPUAN",
+        race: "Melayu",
+        nationality: "Malaysia",
+        contactEmail: "lampiran2@contoh.my",
+        contactPhone: "012-3456789",
+        contactPhone2: "03-88889999",
+        postalAddress: "No. 1, Jalan Contoh, 62000 Putrajaya",
+        occupation: "Kontraktor",
+        employer: "Syarikat Contoh",
+      },
+    });
+    const detail = expectStatus<Record<string, unknown>>(
+      await kui.get(`/admin/complaints/${created.id}`),
+      200,
+    );
+    assert.equal(detail.receivedVia, "SURAT_LAYANG");
+    assert.equal(detail.accusedPosition, "Penolong Pegawai");
+    assert.equal(detail.accused2Particulars, "Pegawai Lampiran Dua");
+    assert.equal(detail.accused2Department, "Syarikat Kedua Sdn Bhd");
+    assert.equal(detail.accused2Position, "Pengurus");
+    assert.equal(detail.incidentDate, "2026-02-14");
+    assert.equal(detail.incidentTime, "14:30");
+    assert.equal(detail.hasSupportingDocuments, true);
+    const complainant = detail.complainant as Record<string, unknown>;
+    assert.equal(complainant.icNo, "900101145678");
+    assert.equal(complainant.passportNo, "A1234567");
+    assert.equal(complainant.age, 36);
+    assert.equal(complainant.gender, "PEREMPUAN");
+    assert.equal(complainant.complainantCategory, "ORANG_AWAM");
+    assert.equal(complainant.contactPhone2, "03-88889999");
+    assert.equal(complainant.employer, "Syarikat Contoh");
+
+    const updated = expectStatus<Record<string, unknown>>(
+      await kui.patch(`/admin/complaints/${created.id}`, {
+        receivedVia: "TELEFON",
+        incidentTime: null,
+        hasSupportingDocuments: false,
+      }),
+      200,
+    );
+    assert.equal(updated.receivedVia, "TELEFON");
+    assert.equal(updated.incidentTime, null);
+    assert.equal(updated.hasSupportingDocuments, false);
+
+    // No complainant block -> null, not an empty object.
+    const bare = await newComplaint();
+    const bareDetail = expectStatus<Record<string, unknown>>(
+      await kui.get(`/admin/complaints/${bare.id}`),
+      200,
+    );
+    assert.equal(bareDetail.complainant, null);
+  });
+
+  it("refuses malformed form fields", async () => {
+    for (const fields of [
+      { receivedVia: "SAI" },
+      { incidentTime: "25:00" },
+      { complainant: { particulars: "A", icNo: "12345" } },
+      { complainant: { particulars: "A", age: 200 } },
+      { complainant: { particulars: "A", gender: "L" } },
+      { complainant: { particulars: "A", contactPhone2: "tiada" } },
+    ]) {
+      const res = await kui.post("/admin/complaints", {
+        caseDescription: "Aduan medan tidak sah",
+        duplicateCheckAcknowledged: true,
+        ...fields,
+      });
+      assert.equal(res.status, 422, JSON.stringify(fields));
+    }
+  });
+
+  it("the duplicate check matches the second accused person against either slot", async () => {
+    await newComplaint({
+      receivedDateUi: null,
+      accusedParticulars: "Zulkarnain Tohmahan Kedua",
+    });
+    const res = await kui.post("/admin/complaints", {
+      caseDescription: "Aduan lain sama sekali tentang perkara berbeza",
+      accused2Particulars: "Zulkarnain Tohmahan Kedua",
+    });
+    assert.equal(res.status, 409, JSON.stringify(res.body));
+  });
+});
+
 describe("complaint list status filter", () => {
   it("returns only complaints in the requested status", async () => {
     const c = await newComplaint();
@@ -696,6 +896,38 @@ describe("complaint list status filter", () => {
     assert.ok(nfa.some((r) => r.id === c.id));
 
     expectRefused(await kui.get("/admin/complaints?status=DITUTUP"), 400);
+  });
+
+  it("filters by period on the received date, falling back to the complaint date", async () => {
+    const received = await newComplaint({ receivedDateUi: "2026-11-10" });
+    const byComplaintDate = await newComplaint({
+      receivedDateUi: null,
+      complaintDate: "2026-11-30",
+    });
+    const outside = await newComplaint({ receivedDateUi: "2026-12-01" });
+    // received_date_ui wins over complaint_date when both are set.
+    const overridden = await newComplaint({
+      receivedDateUi: "2026-12-02",
+      complaintDate: "2026-11-15",
+    });
+
+    const rows = expectStatus<Complaint[]>(
+      await kui.get(
+        "/admin/complaints?from=2026-11-01&to=2026-11-30&limit=200",
+      ),
+      200,
+    );
+    const ids = rows.map((r) => r.id);
+    assert.ok(ids.includes(received.id));
+    assert.ok(ids.includes(byComplaintDate.id));
+    assert.ok(!ids.includes(outside.id));
+    assert.ok(!ids.includes(overridden.id));
+
+    expectRefused(
+      await kui.get("/admin/complaints?from=2026-12-01&to=2026-11-01"),
+      400,
+    );
+    expectRefused(await kui.get("/admin/complaints?from=Mac"), 400);
   });
 });
 

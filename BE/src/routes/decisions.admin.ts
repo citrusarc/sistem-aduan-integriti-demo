@@ -23,11 +23,13 @@ import {
   setCaseActionAssignee,
   updateCaseAction,
 } from "../db/queries/caseActions.js";
+import { listReferralRecipients } from "../db/queries/staffUsers.js";
 import { setAssigneeSchema } from "../validation/staff.js";
 import {
   toCaseAction,
   toDecisionLogEntry,
   toJmmDecision,
+  toReferralRecipient,
   toSignatory,
 } from "../db/mappers.js";
 
@@ -104,6 +106,7 @@ adminDecisionsRouter.post("/:id/sign", async (req, res) => {
   }
 
   const signed = await signDecisionSlot(
+    id,
     parsed.data.signatoryId,
     parsed.data.signedAt ?? new Date().toISOString(),
   );
@@ -111,7 +114,7 @@ adminDecisionsRouter.post("/:id/sign", async (req, res) => {
   if (!signed) {
     throw new HttpError(
       409,
-      "Slot tandatangan tidak dijumpai atau telah ditandatangani",
+      "Slot tandatangan tidak dijumpai bagi keputusan ini atau telah ditandatangani",
     );
   }
 
@@ -125,6 +128,17 @@ adminDecisionsRouter.post("/:id/sign", async (req, res) => {
 
 export const adminCaseActionsRouter: Router = Router();
 adminCaseActionsRouter.use(requireStaff(...INTEGRITY_UNIT_ROLES));
+
+/**
+ * Who an action can be referred to: KJ / SUB_UNIT accounts, with `isActive` so
+ * the picker offers only active ones but can still name a past assignee. The
+ * full staff list stays ADMIN only; this is just the referral targets, without
+ * email.
+ */
+adminCaseActionsRouter.get("/assignees", async (_req, res) => {
+  const rows = await listReferralRecipients();
+  res.json({ data: rows.map(toReferralRecipient) });
+});
 
 adminCaseActionsRouter.patch("/:id", async (req, res) => {
   const id = idSchema.parse(req.params.id);

@@ -235,6 +235,95 @@ describe("portal submission (§8 decision 3)", () => {
     });
   });
 
+  it("Lampiran 2: stores the form's fields; the response stays public-safe", async () => {
+    const created = expectStatus(
+      await submit(
+        {
+          particulars: "Pengadu Borang",
+          complainantCategory: "WARGA_AGENSI",
+          icNo: "880202105555",
+          gender: "LELAKI",
+          nationality: "Malaysia",
+          contactEmail: "borang@contoh.my",
+          contactPhone2: "019-8765432",
+          occupation: "Pegawai Tadbir",
+        },
+        {
+          accusedParticulars: "Pihak Pertama",
+          accusedPosition: "Juruaudit",
+          accused2Particulars: "Pihak Kedua",
+          incidentDate: "2026-01-05",
+          incidentTime: "09:15",
+          hasSupportingDocuments: false,
+        },
+      ),
+      201,
+    );
+    assert.deepEqual(sortedKeys(created), PUBLIC_COMPLAINT_KEYS);
+
+    const { rows } = await ctx.sql<Record<string, unknown>>(
+      `SELECT p.ic_no, p.complainant_category::text, p.contact_phone_2,
+              c.accused_position, c.accused2_particulars, c.incident_date,
+              c.incident_time::text, c.has_supporting_documents
+         FROM complaints c JOIN complainants p ON p.id = c.complainant_id
+        WHERE c.complaint_ref_no = $1`,
+      [created.complaintRefNo],
+    );
+    assert.deepEqual(rows[0], {
+      ic_no: "880202105555",
+      complainant_category: "WARGA_AGENSI",
+      contact_phone_2: "019-8765432",
+      accused_position: "Juruaudit",
+      accused2_particulars: "Pihak Kedua",
+      incident_date: "2026-01-05",
+      incident_time: "09:15:00",
+      has_supporting_documents: false,
+    });
+  });
+
+  it("anonymous: refuses every identifying Lampiran 2 field", async () => {
+    const before = await complaintCount();
+    for (const extra of [
+      { icNo: "880202105555" },
+      { passportNo: "A1234567" },
+      { age: 40 },
+      { gender: "LELAKI" },
+      { race: "Cina" },
+      { nationality: "Malaysia" },
+      { postalAddress: "Alamat" },
+      { occupation: "Guru" },
+      { employer: "Sekolah" },
+    ]) {
+      const res = await submit({
+        isAnonymous: true,
+        contactEmail: "tanpanama.borang@contoh.my",
+        ...extra,
+      });
+      assert.equal(res.status, 422, JSON.stringify(extra));
+    }
+    assert.equal(await complaintCount(), before);
+
+    // The database refuses it too, whatever the API does.
+    await assert.rejects(
+      ctx.sql(
+        `INSERT INTO complainants (is_anonymous, contact_email, ic_no)
+         VALUES (true, 'x@contoh.my', '880202105555')`,
+      ),
+      /chk_anonymous_identity/,
+    );
+
+    // Category and a second phone don't identify the person, and are kept.
+    expectStatus(
+      await submit({
+        isAnonymous: true,
+        contactEmail: "tanpanama.borang@contoh.my",
+        complainantCategory: "ORANG_AWAM",
+        contactPhone2: "011-1111111",
+      }),
+      201,
+    );
+  });
+
   it("refuses a named submission with no name, a bad email, a bad phone, or no complainant block", async () => {
     const before = await complaintCount();
     for (const complainant of [

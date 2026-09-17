@@ -12,7 +12,9 @@
 
 import type {
   CaseActionType,
+  ComplainantCategory,
   ComplaintDirectedTo,
+  Gender,
   GradeLevelGroup,
   InfoClassification,
   ComplaintStatus,
@@ -23,6 +25,7 @@ import type {
   JmmSignatoryCategory,
   JmmSource,
   ProtectionRequestStatus,
+  ReceivedVia,
   Sector,
   SourceChannel,
   StaffRole,
@@ -52,6 +55,23 @@ export type ComplainantRow = {
   contact_phone: string | null;
   /** When true, `particulars` is always NULL (DB check constraint). */
   is_anonymous: boolean;
+  /**
+   * Migration 010 — BORANG ADUAN/ MAKLUMAT (Lampiran 2). All optional, all
+   * internal. When `is_anonymous`, everything from `ic_no` to `employer` except
+   * `contact_phone_2` is NULL (chk_anonymous_identity).
+   */
+  complainant_category: ComplainantCategory | null;
+  ic_no: string | null;
+  passport_no: string | null;
+  age: number | null;
+  gender: Gender | null;
+  race: string | null;
+  nationality: string | null;
+  /** For staff to call manually only — nothing sends to it (rule 10). */
+  contact_phone_2: string | null;
+  postal_address: string | null;
+  occupation: string | null;
+  employer: string | null;
   created_at: Date;
 };
 
@@ -67,12 +87,24 @@ export type ComplaintRow = {
   accused_particulars: string | null;
   accused_grade_level: GradeLevelGroup | null;
   accused_department: string | null;
+  /** Migration 010 — Lampiran 2 JAWATAN (1), and the second accused person. */
+  accused_position: string | null;
+  accused2_particulars: string | null;
+  accused2_department: string | null;
+  accused2_position: string | null;
   info_classification: InfoClassification | null;
   integrity_category: IntegrityCategory | null;
   sector: Sector | null;
   case_description: string | null;
   complaint_date: string | null;
   received_date_ui: string | null;
+  /** Migration 010 — TARIKH / MASA KEJADIAN. Time is 'HH:MM:SS' as pg returns it. */
+  incident_date: string | null;
+  incident_time: string | null;
+  /** Migration 010 — DOKUMEN SOKONGAN ADA/ TIADA; NULL = not stated. */
+  has_supporting_documents: boolean | null;
+  /** Migration 010 — Lampiran 2's own channel list, not `source_channel`. */
+  received_via: ReceivedVia | null;
   /** Migration 005. Written by the API on each transition. */
   status: ComplaintStatus;
   status_changed_at: Date;

@@ -23,16 +23,18 @@ import {
 import {
   createDecision,
   getQuorumState,
-  listDecisionsForComplaint,
-  listSignatories,
+  listDecisionsWithSignatures,
 } from "../db/queries/jmmDecisions.js";
 import {
   createCaseAction,
   listCaseActions,
 } from "../db/queries/caseActions.js";
+import { getComplainantById } from "../db/queries/complainants.js";
 import {
   toAdminComplaint,
   toCaseAction,
+  toComplainant,
+  toDecisionWithSignatures,
   toJmmDecision,
   toSignatory,
 } from "../db/mappers.js";
@@ -85,6 +87,8 @@ adminComplaintsRouter.post("/", async (req, res) => {
     const candidates = await findDuplicateCandidates({
       accusedParticulars: parsed.data.accusedParticulars,
       accusedDepartment: parsed.data.accusedDepartment,
+      accused2Particulars: parsed.data.accused2Particulars,
+      accused2Department: parsed.data.accused2Department,
       caseDescription: parsed.data.caseDescription,
     });
 
@@ -108,23 +112,19 @@ adminComplaintsRouter.get("/:id", async (req, res) => {
   const complaint = await getComplaintById(id);
   if (!complaint) throw new HttpError(404, "Aduan tidak dijumpai");
 
-  const [decisions, caseActions] = await Promise.all([
-    listDecisionsForComplaint(id),
+  const [decisions, caseActions, complainant] = await Promise.all([
+    listDecisionsWithSignatures(id),
     listCaseActions(id),
+    complaint.complainant_id
+      ? getComplainantById(complaint.complainant_id)
+      : undefined,
   ]);
-
-  const decisionsWithQuorum = await Promise.all(
-    decisions.map(async (decision) => ({
-      ...toJmmDecision(decision),
-      signatories: (await listSignatories(decision.id)).map(toSignatory),
-      quorum: await getQuorumState(decision.id),
-    })),
-  );
 
   res.json({
     data: {
       ...toAdminComplaint(complaint),
-      decisions: decisionsWithQuorum,
+      complainant: complainant ? toComplainant(complainant) : null,
+      decisions: decisions.map(toDecisionWithSignatures),
       caseActions: caseActions.map(toCaseAction),
     },
   });
@@ -168,17 +168,8 @@ adminComplaintsRouter.patch("/:id", async (req, res) => {
 
 adminComplaintsRouter.get("/:id/decisions", async (req, res) => {
   const id = idSchema.parse(req.params.id);
-  const decisions = await listDecisionsForComplaint(id);
-
-  res.json({
-    data: await Promise.all(
-      decisions.map(async (decision) => ({
-        ...toJmmDecision(decision),
-        signatories: (await listSignatories(decision.id)).map(toSignatory),
-        quorum: await getQuorumState(decision.id),
-      })),
-    ),
-  });
+  const decisions = await listDecisionsWithSignatures(id);
+  res.json({ data: decisions.map(toDecisionWithSignatures) });
 });
 
 /**

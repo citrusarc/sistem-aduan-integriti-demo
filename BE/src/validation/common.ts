@@ -1,8 +1,10 @@
 import { z } from "zod";
 import {
   CASE_ACTION_TYPE,
+  COMPLAINANT_CATEGORY,
   COMPLAINT_DIRECTED_TO,
   COMPLAINT_STATUS,
+  GENDER,
   GRADE_LEVEL_GROUP,
   INFO_CLASSIFICATION,
   INTEGRITY_CATEGORY,
@@ -11,6 +13,7 @@ import {
   JMM_OUTCOME,
   JMM_SIGNATORY_CATEGORY,
   JMM_SOURCE,
+  RECEIVED_VIA,
   SECTOR,
   SOURCE_CHANNEL,
   STAFF_ROLE,
@@ -36,6 +39,9 @@ export const jmmSignatoryCategorySchema = z.enum(JMM_SIGNATORY_CATEGORY);
 export const staffRoleSchema = z.enum(STAFF_ROLE);
 export const complaintStatusSchema = z.enum(COMPLAINT_STATUS);
 export const jmmMeetingStatusSchema = z.enum(JMM_MEETING_STATUS);
+export const complainantCategorySchema = z.enum(COMPLAINANT_CATEGORY);
+export const genderSchema = z.enum(GENDER);
+export const receivedViaSchema = z.enum(RECEIVED_VIA);
 
 /**
  * Business rule 3 — exactly these 6, never a 7th. Because this is derived from
@@ -108,3 +114,22 @@ export const phoneSchema = z
   .string()
   .trim()
   .regex(/^\+?[0-9][0-9 -]{5,18}[0-9]$/, "Nombor telefon tidak sah");
+
+/** Time of day as 'HH:MM' (seconds allowed) — a TIME column. */
+export const timeStringSchema = z
+  .string()
+  .regex(/^([01]\d|2[0-3]):[0-5]\d(:[0-5]\d)?$/, "Masa mesti dalam format HH:MM");
+
+/** Malaysian MyKad number, stored as 12 digits (dashes are dropped). */
+export const icNoSchema = z
+  .string()
+  .trim()
+  .regex(/^\d{6}-?\d{2}-?\d{4}$/, "No. kad pengenalan mesti 12 digit")
+  .transform((value) => value.replace(/-/g, ""));
+
+/** Passport number, stored upper-cased. */
+export const passportNoSchema = z
+  .string()
+  .trim()
+  .regex(/^[A-Za-z0-9]{5,20}$/, "No. pasport tidak sah")
+  .transform((value) => value.toUpperCase());

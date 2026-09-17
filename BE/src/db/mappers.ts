@@ -9,7 +9,7 @@ import type {
   StaffUserRow,
 } from "../types/entities.js";
 import type { AgendaItemRow, MeetingListRow } from "./queries/jmmMeetings.js";
-import type { DecisionLogRow } from "./queries/jmmDecisions.js";
+import type { DecisionLogRow, QuorumState } from "./queries/jmmDecisions.js";
 import type { ReferredActionRow } from "./queries/caseActions.js";
 import type { StaffAccountRow } from "../auth/store.js";
 import type {
@@ -65,12 +65,21 @@ export function toAdminComplaint(row: ComplaintRow) {
     accusedParticulars: row.accused_particulars,
     accusedGradeLevel: row.accused_grade_level,
     accusedDepartment: row.accused_department,
+    accusedPosition: row.accused_position,
+    accused2Particulars: row.accused2_particulars,
+    accused2Department: row.accused2_department,
+    accused2Position: row.accused2_position,
     infoClassification: row.info_classification,
     integrityCategory: row.integrity_category,
     sector: row.sector,
     caseDescription: row.case_description,
     complaintDate: row.complaint_date,
     receivedDateUi: row.received_date_ui,
+    incidentDate: row.incident_date,
+    /** 'HH:MM' — the form has no seconds. */
+    incidentTime: row.incident_time?.slice(0, 5) ?? null,
+    hasSupportingDocuments: row.has_supporting_documents,
+    receivedVia: row.received_via,
     status: row.status,
     statusChangedAt: row.status_changed_at,
     createdAt: row.created_at,
@@ -78,11 +87,29 @@ export function toAdminComplaint(row: ComplaintRow) {
   };
 }
 
+/**
+ * Internal only (Integrity Unit case file): BUTIR-BUTIR PENGADU from Lampiran 2.
+ * Never returned by `/api/complaints/*` or `/api/complainant/*` (rule 9).
+ */
 export function toComplainant(row: ComplainantRow) {
   return {
     id: row.id,
+    isAnonymous: row.is_anonymous,
+    complainantCategory: row.complainant_category,
     particulars: row.particulars,
     gradeLevel: row.grade_level,
+    icNo: row.ic_no,
+    passportNo: row.passport_no,
+    age: row.age,
+    gender: row.gender,
+    race: row.race,
+    nationality: row.nationality,
+    contactEmail: row.contact_email,
+    contactPhone: row.contact_phone,
+    contactPhone2: row.contact_phone_2,
+    postalAddress: row.postal_address,
+    occupation: row.occupation,
+    employer: row.employer,
     createdAt: row.created_at,
   };
 }
@@ -101,6 +128,19 @@ export function toJmmDecision(row: JmmDecisionRow) {
     remarksFurtherAction: row.remarks_further_action,
     meetingId: row.meeting_id,
     createdAt: row.created_at,
+  };
+}
+
+/** Internal only (rule 9): a decision with its signature block and quorum. */
+export function toDecisionWithSignatures(item: {
+  decision: JmmDecisionRow;
+  signatories: JmmDecisionSignatoryRow[];
+  quorum: QuorumState;
+}) {
+  return {
+    ...toJmmDecision(item.decision),
+    signatories: item.signatories.map(toSignatory),
+    quorum: item.quorum,
   };
 }
 
@@ -142,6 +182,16 @@ export function toStaffUser(row: StaffUserRow) {
     email: row.email,
     isActive: row.is_active,
     createdAt: row.created_at,
+  };
+}
+
+/** A referral target for the Integrity Unit's picker. Allow-listed: no email. */
+export function toReferralRecipient(row: StaffUserRow) {
+  return {
+    id: row.id,
+    fullName: row.full_name,
+    role: row.role,
+    isActive: row.is_active,
   };
 }
 

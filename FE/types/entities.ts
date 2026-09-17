@@ -6,8 +6,10 @@
 
 import type {
   CaseActionType,
+  ComplainantCategory,
   ComplaintDirectedTo,
   ComplaintStatus,
+  Gender,
   GradeLevelGroup,
   InfoClassification,
   IntegrityCategory,
@@ -17,6 +19,7 @@ import type {
   JmmSignatoryCategory,
   JmmSource,
   ProtectionRequestStatus,
+  ReceivedVia,
   StaffRole,
   Sector,
   SourceChannel,
@@ -50,12 +53,24 @@ export type AdminComplaint = {
   accusedParticulars: string | null;
   accusedGradeLevel: GradeLevelGroup | null;
   accusedDepartment: string | null;
+  /** Lampiran 2: JAWATAN (1), and NAMA ORANG YANG DITOHMAH (2). */
+  accusedPosition: string | null;
+  accused2Particulars: string | null;
+  accused2Department: string | null;
+  accused2Position: string | null;
   infoClassification: InfoClassification | null;
   integrityCategory: IntegrityCategory | null;
   sector: Sector | null;
   caseDescription: string | null;
   complaintDate: string | null;
   receivedDateUi: string | null;
+  incidentDate: string | null;
+  /** 'HH:MM'. */
+  incidentTime: string | null;
+  /** DOKUMEN SOKONGAN ADA/ TIADA; null = not stated. */
+  hasSupportingDocuments: boolean | null;
+  /** Lampiran 2's own channel list — not `sourceChannel`. */
+  receivedVia: ReceivedVia | null;
   status: ComplaintStatus;
   statusChangedAt: string;
   createdAt: string;
@@ -115,7 +130,35 @@ export type CaseAction = {
   updatedAt: string;
 };
 
+/**
+ * BUTIR-BUTIR PENGADU (Lampiran 2). Integrity Unit case file only — never on a
+ * portal response (rule 9). Anonymous: no name or identifying fields.
+ */
+export type Complainant = {
+  id: string;
+  isAnonymous: boolean;
+  complainantCategory: ComplainantCategory | null;
+  particulars: string | null;
+  gradeLevel: GradeLevelGroup | null;
+  icNo: string | null;
+  passportNo: string | null;
+  age: number | null;
+  gender: Gender | null;
+  race: string | null;
+  nationality: string | null;
+  contactEmail: string | null;
+  /** Both phones are for staff to call by hand (rule 10). */
+  contactPhone: string | null;
+  contactPhone2: string | null;
+  postalAddress: string | null;
+  occupation: string | null;
+  employer: string | null;
+  createdAt: string;
+};
+
 export type AdminComplaintDetail = AdminComplaint & {
+  /** null when the case was registered without complainant details. */
+  complainant: Complainant | null;
   decisions: JmmDecision[];
   caseActions: CaseAction[];
 };
@@ -185,23 +228,42 @@ export type ComplaintStats = {
 };
 
 /**
- * POST /complaints body — the public portal submission (§8 decision 3).
- * Anonymous: `contactEmail` required, `particulars` must be absent. Named:
- * `particulars` required. `contactPhone` is kept for staff to call by hand;
- * the system never sends anything to it (rule 10).
+ * POST /complaints body — the public portal submission (§8 decision 3), laid
+ * out as BORANG ADUAN/ MAKLUMAT (Lampiran 2). Anonymous: `contactEmail`
+ * required; `particulars` and every identifying field must be absent. Named:
+ * `particulars` required. Both phones are kept for staff to call by hand; the
+ * system never sends anything to them (rule 10). The complaint date and both
+ * channel fields are set by BE.
  */
 export type PublicComplaintSubmission = {
   caseDescription?: string | null;
   accusedParticulars?: string | null;
   accusedDepartment?: string | null;
+  accusedPosition?: string | null;
+  accused2Particulars?: string | null;
+  accused2Department?: string | null;
+  accused2Position?: string | null;
   integrityCategory?: IntegrityCategory | null;
-  complaintDate?: string | null;
+  incidentDate?: string | null;
+  incidentTime?: string | null;
+  hasSupportingDocuments?: boolean | null;
   complainant: {
     isAnonymous: boolean;
     particulars?: string | null;
     gradeLevel?: GradeLevelGroup | null;
     contactEmail?: string | null;
     contactPhone?: string | null;
+    complainantCategory?: ComplainantCategory | null;
+    icNo?: string | null;
+    passportNo?: string | null;
+    age?: number | null;
+    gender?: Gender | null;
+    race?: string | null;
+    nationality?: string | null;
+    contactPhone2?: string | null;
+    postalAddress?: string | null;
+    occupation?: string | null;
+    employer?: string | null;
   };
   /** Must be literally true. */
   disclaimerAcknowledged: true;
@@ -250,6 +312,15 @@ export type ReferredAction = {
   feedbackStatus: string | null;
 };
 
+/** GET /admin/case-actions/assignees — who an action can be referred to. */
+export type ReferralRecipient = {
+  id: string;
+  fullName: string;
+  role: StaffRole;
+  /** Only active accounts are accepted as a new assignee. */
+  isActive: boolean;
+};
+
 /** GET /admin/staff — ADMIN only. Never a password hash. */
 export type StaffAccount = {
   id: string;
@@ -263,3 +334,21 @@ export type StaffAccount = {
   passwordChangedAt: string | null;
   createdAt: string;
 };
+
+/** GET /admin/decisions/:id — the signature block and quorum. */
+export type DecisionSignatureState = {
+  id: string
+  signatories: JmmSignatory[]
+  quorum: QuorumState
+}
+
+/** POST /admin/decisions/:id/sign */
+export type SignSlotResult = {
+  signatory: JmmSignatory
+  quorum: QuorumState
+}
+
+/** POST /complainant/auth/request-code — the same message whatever happened. */
+export type OtpRequested = { message: string }
+
+export type HealthStatus = { status: "ok"; uptime: number }

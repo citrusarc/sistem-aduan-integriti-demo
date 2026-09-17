@@ -186,39 +186,101 @@ export type QuorumState = {
   finalized: boolean;
 };
 
-export async function getQuorumState(
-  decisionId: string,
+/**
+ * Quorum for several decisions in one query — the single SQL definition of
+ * rule 1; getQuorumState is this for one id. A decision with no signatories
+ * gets an all-false state.
+ */
+export async function getQuorumStates(
+  decisionIds: string[],
   /** Pass the transaction's client when called inside one. */
   client?: PoolClient,
-): Promise<QuorumState> {
+): Promise<Map<string, QuorumState>> {
+  const states = new Map<string, QuorumState>();
+  if (!decisionIds.length) return states;
+
   const result = await (client ?? pool).query<{
+    decision_id: string;
     signed_chairs: string;
     signed_members: string;
     unsigned: string;
     total: string;
   }>(
     `SELECT
+       jmm_decision_id                                                               AS decision_id,
        count(*) FILTER (WHERE role_category = 'PENGERUSI' AND signed_at IS NOT NULL) AS signed_chairs,
        count(*) FILTER (WHERE role_category = 'AHLI'      AND signed_at IS NOT NULL) AS signed_members,
        count(*) FILTER (WHERE signed_at IS NULL)                                     AS unsigned,
        count(*)                                                                      AS total
      FROM jmm_decision_signatories
-     WHERE jmm_decision_id = $1`,
-    [decisionId],
+     WHERE jmm_decision_id = ANY($1::bigint[])
+     GROUP BY jmm_decision_id`,
+    [decisionIds],
   );
-  const row = result.rows[0];
+  const rows = new Map(result.rows.map((r) => [r.decision_id, r]));
 
-  const hasChair = Number(row?.signed_chairs ?? 0) > 0;
-  const memberCount = Number(row?.signed_members ?? 0);
-  const total = Number(row?.total ?? 0);
-  const fullySigned = total > 0 && Number(row?.unsigned ?? 0) === 0;
+  for (const id of decisionIds) {
+    const row = rows.get(id);
+    const hasChair = Number(row?.signed_chairs ?? 0) > 0;
+    const memberCount = Number(row?.signed_members ?? 0);
+    const total = Number(row?.total ?? 0);
+    const fullySigned = total > 0 && Number(row?.unsigned ?? 0) === 0;
+    states.set(id, {
+      hasChair,
+      memberCount,
+      fullySigned,
+      finalized: hasChair && memberCount >= 1 && fullySigned,
+    });
+  }
+  return states;
+}
 
-  return {
-    hasChair,
-    memberCount,
-    fullySigned,
-    finalized: hasChair && memberCount >= 1 && fullySigned,
-  };
+export async function getQuorumState(
+  decisionId: string,
+  /** Pass the transaction's client when called inside one. */
+  client?: PoolClient,
+): Promise<QuorumState> {
+  return (await getQuorumStates([decisionId], client)).get(decisionId)!;
+}
+
+/**
+ * A complaint's decisions with their signature blocks and quorum, in three
+ * queries whatever the number of decisions.
+ */
+export async function listDecisionsWithSignatures(complaintId: string): Promise<
+  {
+    decision: JmmDecisionRow;
+    signatories: JmmDecisionSignatoryRow[];
+    quorum: QuorumState;
+  }[]
+> {
+  const decisions = await listDecisionsForComplaint(complaintId);
+  const ids = decisions.map((d) => d.id);
+  if (!ids.length) return [];
+
+  const [signatories, quorum] = await Promise.all([
+    query<JmmDecisionSignatoryRow>(
+      `SELECT ${SIGNATORY_COLUMNS}
+         FROM jmm_decision_signatories
+        WHERE jmm_decision_id = ANY($1::bigint[])
+        ORDER BY role_category, role_title`,
+      [ids],
+    ),
+    getQuorumStates(ids),
+  ]);
+
+  const byDecision = new Map<string, JmmDecisionSignatoryRow[]>();
+  for (const row of signatories.rows) {
+    const list = byDecision.get(row.jmm_decision_id) ?? [];
+    list.push(row);
+    byDecision.set(row.jmm_decision_id, list);
+  }
+
+  return decisions.map((decision) => ({
+    decision,
+    signatories: byDecision.get(decision.id) ?? [],
+    quorum: quorum.get(decision.id)!,
+  }));
 }
 
 /**
@@ -235,21 +297,25 @@ export async function isDecisionLocked(decisionId: string): Promise<boolean> {
 }
 
 /**
- * Records a signature against one signatory slot. Adding a signature to an
- * already-finalized decision is refused by the caller via `isDecisionLocked`;
- * this only ever moves a slot from unsigned to signed, never the reverse.
+ * Records a signature against one signatory slot of `decisionId`. Adding a
+ * signature to an already-finalized decision is refused by the caller via
+ * `isDecisionLocked`; this only ever moves a slot from unsigned to signed,
+ * never the reverse. A slot belonging to another decision is not touched, so
+ * the lock the caller checked is the lock of the decision actually signed.
  */
 export async function signDecisionSlot(
+  decisionId: string,
   signatoryId: string,
   signedAt: string,
 ): Promise<JmmDecisionSignatoryRow | undefined> {
   return queryOne<JmmDecisionSignatoryRow>(
     `UPDATE jmm_decision_signatories
-        SET signed_at = $2
-      WHERE id = $1
+        SET signed_at = $3
+      WHERE id = $2
+        AND jmm_decision_id = $1
         AND signed_at IS NULL
       RETURNING ${SIGNATORY_COLUMNS}`,
-    [signatoryId, signedAt],
+    [decisionId, signatoryId, signedAt],
   );
 }
 

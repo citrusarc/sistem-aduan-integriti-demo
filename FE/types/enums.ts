@@ -153,6 +153,12 @@ export const INTEGRITY_UNIT_ROLES: readonly StaffRole[] = [
 export type StaffRole = keyof typeof STAFF_ROLE
 
 /**
+ * Roles that receive referred case actions (§8 decision 5). Mirrors
+ * REFERRAL_RECIPIENT_ROLES in BE/src/auth/roles.ts. Outside the Integrity Unit.
+ */
+export const REFERRAL_RECIPIENT_ROLES: readonly StaffRole[] = ["KJ", "SUB_UNIT"]
+
+/**
  * complaint_status_enum — stored on `complaints.status` and written by the API
  * on each transition (CLAUDE.md §4). Render through StatusPill.
  */
@@ -177,6 +183,42 @@ export const PROTECTION_REQUEST_STATUS = {
   DITOLAK: "Ditolak",
 } as const
 export type ProtectionRequestStatus = keyof typeof PROTECTION_REQUEST_STATUS
+
+// ─── BORANG ADUAN/ MAKLUMAT (Lampiran 2) — db/migrations/010 ───────────────
+
+export const COMPLAINANT_CATEGORY = {
+  WARGA_AGENSI: "Warga Agensi",
+  ORANG_AWAM: "Orang Awam",
+} as const
+export type ComplainantCategory = keyof typeof COMPLAINANT_CATEGORY
+
+export const GENDER = {
+  LELAKI: "Lelaki",
+  PEREMPUAN: "Perempuan",
+} as const
+export type Gender = keyof typeof GENDER
+
+/**
+ * "Cara aduan/ maklumat diterima" — the form's own 14-item list, in form order.
+ * Not SOURCE_CHANNEL (Masterlist) and not JMM_SOURCE (BORANG JMM).
+ */
+export const RECEIVED_VIA = {
+  PENGADU_DATANG_SENDIRI: "Pengadu Datang Sendiri",
+  SISTEM_ADUAN_INTEGRITI: "Sistem Aduan Integriti",
+  PEGAWAI_INTEGRITI: "Pegawai Integriti",
+  KETUA_JABATAN: "Ketua Jabatan",
+  SISPAA: "SISPAA",
+  BPA: "BPA",
+  LSPRM: "LSPRM",
+  LKAN: "LKAN",
+  SURAT_RASMI_JABATAN_KERAJAAN: "Surat Rasmi Jabatan Kerajaan",
+  EMEL_FAKSIMILI: "E-mel & Faksimile",
+  TELEFON: "Telefon",
+  MEDIA_SOSIAL: "Media Sosial",
+  MEDIA_MASSA: "Media Massa",
+  SURAT_LAYANG: "Surat Layang",
+} as const
+export type ReceivedVia = keyof typeof RECEIVED_VIA
 
 /** Narrow an unknown API string to a known enum key, for defensive rendering. */
 export function labelFor<T extends Record<string, string>>(

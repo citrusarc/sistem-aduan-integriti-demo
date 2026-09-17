@@ -1,4 +1,5 @@
 import { queryOne } from "../client.js";
+import { PERIOD_DATE_SQL } from "./complaints.js";
 import {
   COMPLAINT_STATUS,
   INTEGRITY_CATEGORY,
@@ -13,13 +14,9 @@ import {
  * Status is the stored `complaints.status` (§8 decision 1), so these counts
  * are safe for reporting; no bucket is inferred from free text.
  *
- * Period: a complaint's month is its `received_date_ui` (TARIKH TERIMA DI UI),
- * falling back to `complaint_date`, then the day it was registered here. The
- * masterlist's own `report_month` is free text with no fixed format, so it
- * can't be grouped or filtered reliably.
+ * Period: PERIOD_DATE_SQL (`received_date_ui`, else `complaint_date`, else
+ * the registration day) — the same date the register's period filter uses.
  */
-const PERIOD_DATE_SQL =
-  "COALESCE(received_date_ui, complaint_date, (created_at AT TIME ZONE 'Asia/Kuala_Lumpur')::date)";
 
 export type Bucket<T extends string> = { value: T | null; count: number };
 

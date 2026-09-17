@@ -174,3 +174,32 @@ export const PROTECTION_REQUEST_STATUS = [
 ] as const;
 export type ProtectionRequestStatus =
   (typeof PROTECTION_REQUEST_STATUS)[number];
+
+// complainant_category_enum — db/migrations/010, Lampiran 2 "KATEGORI PENGADU"
+export const COMPLAINANT_CATEGORY = ["WARGA_AGENSI", "ORANG_AWAM"] as const;
+export type ComplainantCategory = (typeof COMPLAINANT_CATEGORY)[number];
+
+// gender_enum — db/migrations/010, Lampiran 2 "JANTINA"
+export const GENDER = ["LELAKI", "PEREMPUAN"] as const;
+export type Gender = (typeof GENDER)[number];
+
+// received_via_enum — db/migrations/010, Lampiran 2 "Cara aduan/ maklumat
+// diterima" (14 values, form order). NOT interchangeable with SOURCE_CHANNEL
+// (Masterlist) or JMM_SOURCE (BORANG JMM) — a third form, a third list.
+export const RECEIVED_VIA = [
+  "PENGADU_DATANG_SENDIRI",
+  "SISTEM_ADUAN_INTEGRITI",
+  "PEGAWAI_INTEGRITI",
+  "KETUA_JABATAN",
+  "SISPAA",
+  "BPA",
+  "LSPRM",
+  "LKAN",
+  "SURAT_RASMI_JABATAN_KERAJAAN",
+  "EMEL_FAKSIMILI",
+  "TELEFON",
+  "MEDIA_SOSIAL",
+  "MEDIA_MASSA",
+  "SURAT_LAYANG",
+] as const;
+export type ReceivedVia = (typeof RECEIVED_VIA)[number];
