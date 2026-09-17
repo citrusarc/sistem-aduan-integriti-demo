@@ -15,6 +15,7 @@ import type {
   ComplainantCategory,
   ComplaintDirectedTo,
   Gender,
+  Nationality,
   GradeLevelGroup,
   InfoClassification,
   ComplaintStatus,
@@ -66,7 +67,7 @@ export type ComplainantRow = {
   age: number | null;
   gender: Gender | null;
   race: string | null;
-  nationality: string | null;
+  nationality: Nationality | null;
   /** For staff to call manually only — nothing sends to it (rule 10). */
   contact_phone_2: string | null;
   postal_address: string | null;

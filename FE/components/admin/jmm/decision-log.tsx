@@ -2,7 +2,6 @@
 
 import Link from "next/link"
 import { useSearchParams } from "next/navigation"
-import { XIcon } from "lucide-react"
 
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -78,7 +77,7 @@ export function DecisionLog() {
       <div
         role="search"
         aria-label="Tapis keputusan"
-        className="grid gap-3 rounded-xl border border-border bg-card p-4 sm:grid-cols-2 lg:grid-cols-4"
+        className="grid gap-3 surface-card border-border/70 bg-card p-4 sm:grid-cols-2 lg:grid-cols-4"
       >
         <FormField label="Keputusan">
           <JmmOutcomeSelect
@@ -134,7 +133,6 @@ export function DecisionLog() {
                 })
               }
             >
-              <XIcon data-icon="inline-start" />
               Kosongkan penapis
             </Button>
           </div>

@@ -3,6 +3,8 @@ import { query, queryOne, withTransaction } from "../client.js";
 import { transition, type StatusEvent } from "../complaintStatus.js";
 import { DomainError } from "../errors.js";
 import { malaysiaToday } from "../reportPeriod.js";
+import { insertAttachments } from "./attachments.js";
+import type { PreparedAttachment } from "../../attachments/files.js";
 import type { ComplaintRow } from "../../types/entities.js";
 import type { ComplaintStatus } from "../../types/enums.js";
 
@@ -316,6 +318,13 @@ export type CreateComplaintInput = {
   } | null;
   /** Portal submissions: the handling disclaimer was acknowledged just now. */
   disclaimerAcknowledged?: boolean;
+  /**
+   * Supporting documents already written to disk (§8 decision 10), registered
+   * in this transaction. If it rolls back, the caller removes the files.
+   */
+  attachments?: readonly PreparedAttachment[];
+  /** Who uploaded them; null for a portal submission. */
+  uploadedByStaffId?: string | null;
 };
 
 /**
@@ -332,9 +341,9 @@ export async function createComplaint(
 
     if (input.complainant) {
       const p = input.complainant;
-      // Validation refuses identifying fields on an anonymous submission; this
-      // nulls them again so nothing identifying is stored even if a caller
-      // skipped validation. The check constraints (006, 010) are the backstop.
+      // Validation refuses every detail on an anonymous submission (§8
+      // decision 11); this nulls them again so nothing is stored even if a
+      // caller skipped validation. Check constraints 010 and 012 backstop it.
       const identifying = <T>(value: T | null | undefined) =>
         p.isAnonymous ? null : (value ?? null);
       const inserted = await client.query<{ id: string }>(
@@ -347,18 +356,18 @@ export async function createComplaint(
          RETURNING id`,
         [
           identifying(p.particulars),
-          p.gradeLevel ?? null,
-          p.contactEmail ?? null,
-          p.contactPhone ?? null,
+          identifying(p.gradeLevel),
+          identifying(p.contactEmail),
+          identifying(p.contactPhone),
           p.isAnonymous ?? false,
-          p.complainantCategory ?? null,
+          identifying(p.complainantCategory),
           identifying(p.icNo),
           identifying(p.passportNo),
           identifying(p.age),
           identifying(p.gender),
           identifying(p.race),
           identifying(p.nationality),
-          p.contactPhone2 ?? null,
+          identifying(p.contactPhone2),
           identifying(p.postalAddress),
           identifying(p.occupation),
           identifying(p.employer),
@@ -420,6 +429,15 @@ export async function createComplaint(
 
     const row = result.rows[0];
     if (!row) throw new Error("Gagal mendaftarkan aduan");
+    await recordStatusHistory(client, row.id, null, "BARU");
+    if (input.attachments?.length) {
+      await insertAttachments(
+        client,
+        row.id,
+        input.attachments,
+        input.uploadedByStaffId ?? null,
+      );
+    }
     return row;
   });
 }
@@ -525,8 +543,51 @@ export async function applyStatusEvent(
         WHERE id = $1`,
       [complaint.id, result.to],
     );
+    await recordStatusHistory(
+      client,
+      complaint.id,
+      complaint.status,
+      result.to,
+    );
   }
   return result.to;
+}
+
+/**
+ * §8 decision 13 — one row per status entered, written in the same
+ * transaction as the status itself. Called only from createComplaint and
+ * applyStatusEvent, the two writers of complaints.status.
+ */
+async function recordStatusHistory(
+  client: PoolClient,
+  complaintId: string,
+  from: ComplaintStatus | null,
+  to: ComplaintStatus,
+): Promise<void> {
+  await client.query(
+    `INSERT INTO complaint_status_history (complaint_id, from_status, to_status)
+     VALUES ($1, $2, $3)`,
+    [complaintId, from, to],
+  );
+}
+
+export type StatusHistoryRow = {
+  to_status: ComplaintStatus;
+  changed_at: Date;
+};
+
+/** Oldest first. Callers decide whether the complaint may be disclosed. */
+export async function listStatusHistory(
+  complaintId: string,
+): Promise<StatusHistoryRow[]> {
+  const result = await query<StatusHistoryRow>(
+    `SELECT to_status, changed_at
+       FROM complaint_status_history
+      WHERE complaint_id = $1
+      ORDER BY changed_at, id`,
+    [complaintId],
+  );
+  return result.rows;
 }
 
 /** Staff closes a case: DALAM_TINDAKAN -> SELESAI. */

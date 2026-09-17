@@ -40,7 +40,7 @@ function PageHeader({
  */
 function PagePlaceholder({ note }: { note?: React.ReactNode }) {
   return (
-    <div className="flex flex-col items-center gap-3 rounded-lg border border-dashed border-border bg-card px-6 py-14 text-center">
+    <div className="flex flex-col items-center gap-3 rounded-2xl border border-dashed border-border bg-card px-6 py-14 text-center">
       <ConstructionIcon className="size-6 text-accent" aria-hidden />
       <p className="font-medium">Halaman ini belum dibina</p>
       <p className="max-w-md text-sm text-muted-foreground">

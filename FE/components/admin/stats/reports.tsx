@@ -81,7 +81,7 @@ export function Reports() {
       <div
         role="search"
         aria-label="Tempoh laporan"
-        className="flex flex-wrap items-end gap-3 rounded-xl border border-border bg-card p-4"
+        className="flex flex-wrap items-end gap-3 surface-card border-border/70 bg-card p-4"
       >
         <FormField label="Tahun" className="w-44">
           <Select

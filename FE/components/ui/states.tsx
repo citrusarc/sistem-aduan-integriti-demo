@@ -72,7 +72,7 @@ function StateFrame({
     <div
       role={role}
       className={cn(
-        "flex flex-col items-center justify-center gap-3 rounded-lg border border-dashed px-6 py-12 text-center",
+        "flex flex-col items-center justify-center gap-3 rounded-2xl border border-dashed px-6 py-12 text-center",
         tone === "error"
           ? "border-destructive/40 bg-destructive/5"
           : "border-border bg-card",

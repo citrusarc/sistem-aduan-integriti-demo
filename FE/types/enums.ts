@@ -198,6 +198,13 @@ export const GENDER = {
 } as const
 export type Gender = keyof typeof GENDER
 
+/** Lampiran 2 "WARGANEGARA" — two options only (§8 decision 12). */
+export const NATIONALITY = {
+  WARGANEGARA: "Warganegara",
+  BUKAN_WARGANEGARA: "Bukan warganegara",
+} as const
+export type Nationality = keyof typeof NATIONALITY
+
 /**
  * "Cara aduan/ maklumat diterima" — the form's own 14-item list, in form order.
  * Not SOURCE_CHANNEL (Masterlist) and not JMM_SOURCE (BORANG JMM).

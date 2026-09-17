@@ -2,7 +2,7 @@
 
 import * as React from "react"
 import Link from "next/link"
-import { ArrowLeftIcon, PlusIcon } from "lucide-react"
+import { ArrowLeftIcon } from "lucide-react"
 
 import { useStaffSession } from "@/components/providers/staff-session"
 import { Badge } from "@/components/ui/badge"
@@ -25,7 +25,12 @@ import {
 } from "@/components/ui/table"
 import { useApiData } from "@/hooks/use-api-data"
 import { adminApi } from "@/lib/api"
-import { MIN_PASSWORD_LENGTH } from "@/lib/auth"
+import { meetsPasswordPolicy } from "@/lib/auth"
+import {
+  PasswordInput,
+  PasswordRequirements,
+} from "@/components/ui/password-input"
+import { Section } from "@/components/ui/section"
 import { errorMessage } from "@/lib/errors"
 import type { StaffAccount } from "@/types/entities"
 import { STAFF_ROLE, type StaffRole } from "@/types/enums"
@@ -35,6 +40,7 @@ type Mode =
   | { kind: "role"; account: StaffAccount }
   | { kind: "password"; account: StaffAccount }
   | { kind: "toggle"; account: StaffAccount }
+  | { kind: "unlock"; account: StaffAccount }
 
 /**
  * §8 decision 7 — ADMIN only (BE: requireStaff("ADMIN")). Neither this nor the
@@ -73,13 +79,14 @@ export function StaffManagement() {
               setMode({ kind: "create" })
             }}
           >
-            <PlusIcon data-icon="inline-start" />
             Akaun baharu
           </Button>
         }
       />
 
       {flash && <Notice tone="success">{flash}</Notice>}
+
+      <SecuritySettingsCard />
 
       {accounts.status === "error" ? (
         <ErrorState
@@ -123,7 +130,10 @@ export function StaffManagement() {
                     <Badge tone={a.isActive ? "calm" : "neutral"}>
                       {a.isActive ? "Aktif" : "Tidak aktif"}
                     </Badge>
-                    {a.locked && <Badge tone="accent">Dikunci</Badge>}
+                    {a.locked && <Badge tone="accent">Disekat</Badge>}
+                    {a.passwordChangeRequired && (
+                      <Badge tone="outline">Perlu tukar kata laluan</Badge>
+                    )}
                     {!a.hasPassword && (
                       <Badge tone="outline">Tiada kata laluan</Badge>
                     )}
@@ -138,6 +148,19 @@ export function StaffManagement() {
                 </TableCell>
                 <TableCell>
                   <div className="flex justify-end gap-1">
+                    {a.locked && (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        aria-label={`Buka sekatan ${a.fullName}`}
+                        onClick={() => {
+                          setFlash(null)
+                          setMode({ kind: "unlock", account: a })
+                        }}
+                      >
+                        Buka sekatan
+                      </Button>
+                    )}
                     <Button
                       variant="ghost"
                       size="sm"
@@ -198,6 +221,23 @@ export function StaffManagement() {
         />
       )}
       <ConfirmDialog
+        open={mode?.kind === "unlock"}
+        onOpenChange={(o) => !o && setMode(null)}
+        title={
+          mode?.kind === "unlock"
+            ? `Buka sekatan ${mode.account.fullName}?`
+            : ""
+        }
+        description="Akaun ini disekat selepas 5 cubaan kata laluan yang gagal. Pastikan cubaan itu bukan serangan sebelum membuka sekatan; pemilik juga boleh menggunakan Lupa kata laluan."
+        confirmLabel="Buka sekatan"
+        onConfirm={async () => {
+          if (mode?.kind !== "unlock") return
+          const a = mode.account
+          await adminApi.staff.unlock(a.id)
+          await done(`Sekatan ${a.fullName} dibuka.`)
+        }}
+      />
+      <ConfirmDialog
         open={mode?.kind === "toggle"}
         onOpenChange={(o) => !o && setMode(null)}
         title={
@@ -246,15 +286,12 @@ function CreateDialog({
 
   async function save(event: React.FormEvent) {
     event.preventDefault()
-    if (
-      !fullName.trim() ||
-      !email.trim() ||
-      !role ||
-      password.length < MIN_PASSWORD_LENGTH
-    ) {
-      setError(
-        `Lengkapkan nama, e-mel, peranan dan kata laluan (sekurang-kurangnya ${MIN_PASSWORD_LENGTH} aksara).`
-      )
+    if (!fullName.trim() || !email.trim() || !role) {
+      setError("Lengkapkan nama, e-mel dan peranan.")
+      return
+    }
+    if (!meetsPasswordPolicy(password)) {
+      setError("Kata laluan sementara belum memenuhi semua syarat.")
       return
     }
     setSaving(true)
@@ -326,15 +363,15 @@ function CreateDialog({
         <FormField
           label="Kata laluan sementara"
           required
-          description={`Sekurang-kurangnya ${MIN_PASSWORD_LENGTH} aksara. Serahkan secara selamat.`}
+          description="Serahkan secara selamat. Pemilik akaun wajib menukarnya semasa log masuk pertama."
         >
-          <Input
-            type="password"
+          <PasswordInput
             autoComplete="new-password"
             value={password}
             onChange={(e) => setPassword(e.target.value)}
           />
         </FormField>
+        <PasswordRequirements password={password} />
         {error && <Notice tone="error">{error}</Notice>}
       </form>
     </Dialog>
@@ -421,10 +458,8 @@ function PasswordDialog({
 
   async function save(event: React.FormEvent) {
     event.preventDefault()
-    if (password.length < MIN_PASSWORD_LENGTH) {
-      setError(
-        `Kata laluan mesti sekurang-kurangnya ${MIN_PASSWORD_LENGTH} aksara.`
-      )
+    if (!meetsPasswordPolicy(password)) {
+      setError("Kata laluan belum memenuhi semua syarat.")
       return
     }
     setSaving(true)
@@ -432,7 +467,7 @@ function PasswordDialog({
     try {
       await adminApi.staff.resetPassword(account.id, password)
       await onDone(
-        `Kata laluan ${account.fullName} diset semula; semua sesinya dilog keluar.`
+        `Kata laluan ${account.fullName} diset semula; semua sesinya dilog keluar dan dia perlu menukarnya semasa log masuk seterusnya.`
       )
     } catch (err) {
       setError(errorMessage(err))
@@ -445,7 +480,7 @@ function PasswordDialog({
       open
       onOpenChange={(o) => !o && !saving && onClose()}
       title={`Set semula kata laluan — ${account.fullName}`}
-      description="Akaun ini akan dilog keluar dari semua peranti."
+      description="Akaun ini dilog keluar dari semua peranti, sekatan dibuka, dan pemilik wajib menukar kata laluan semasa log masuk seterusnya."
       size="sm"
       footer={
         <>
@@ -464,19 +499,108 @@ function PasswordDialog({
         noValidate
         className="flex flex-col gap-4"
       >
-        <FormField
-          label="Kata laluan baharu"
-          description={`Sekurang-kurangnya ${MIN_PASSWORD_LENGTH} aksara.`}
-        >
-          <Input
-            type="password"
+        <FormField label="Kata laluan baharu">
+          <PasswordInput
             autoComplete="new-password"
             value={password}
             onChange={(e) => setPassword(e.target.value)}
           />
         </FormField>
+        <PasswordRequirements password={password} />
         {error && <Notice tone="error">{error}</Notice>}
       </form>
     </Dialog>
+  )
+}
+
+/** §8 decision 14 (c): the password expiry period, ADMIN's to set. */
+function SecuritySettingsCard() {
+  const settings = useApiData("security-settings", () =>
+    adminApi.settings.security()
+  )
+  const [days, setDays] = React.useState("")
+  const [saving, setSaving] = React.useState(false)
+  const [message, setMessage] = React.useState<{
+    tone: "error" | "success"
+    text: string
+  } | null>(null)
+
+  const current = settings.data?.passwordMaxAgeDays
+  React.useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    if (current !== undefined) setDays(String(current))
+  }, [current])
+
+  async function save(event: React.FormEvent) {
+    event.preventDefault()
+    const value = Number(days)
+    if (!Number.isInteger(value) || value < 1 || value > 3650) {
+      setMessage({
+        tone: "error",
+        text: "Masukkan bilangan hari antara 1 dan 3650.",
+      })
+      return
+    }
+    setSaving(true)
+    setMessage(null)
+    try {
+      const updated = await adminApi.settings.updateSecurity(value)
+      settings.setData(updated)
+      setMessage({
+        tone: "success",
+        text: `Tempoh luput kata laluan kini ${updated.passwordMaxAgeDays} hari. Berkuat kuasa pada log masuk seterusnya.`,
+      })
+    } catch (err) {
+      setMessage({ tone: "error", text: errorMessage(err) })
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <Section
+      title="Dasar kata laluan"
+      description="Kata laluan kakitangan mesti ditukar selepas tempoh ini. Syarat tetap: sekurang-kurangnya 12 aksara dengan huruf besar, huruf kecil, nombor dan aksara khas; 5 cubaan gagal menyekat akaun; log masuk disahkan dengan kod e-mel."
+    >
+      {settings.status === "error" ? (
+        <ErrorState
+          error={settings.error}
+          onRetry={() => void settings.reload()}
+        />
+      ) : !settings.data ? (
+        <LoadingState />
+      ) : (
+        <form onSubmit={save} noValidate className="flex flex-col gap-3">
+          <div className="flex flex-wrap items-end gap-3">
+            <FormField label="Tempoh luput kata laluan (hari)" className="w-56">
+              <Input
+                type="number"
+                inputMode="numeric"
+                min={1}
+                max={3650}
+                value={days}
+                onChange={(e) => setDays(e.target.value)}
+              />
+            </FormField>
+            <Button type="submit" disabled={saving || days === String(current)}>
+              {saving ? "Menyimpan…" : "Simpan"}
+            </Button>
+          </div>
+          <p className="text-xs text-muted-foreground">
+            Asal: 180 hari (6 bulan).
+            {settings.data.updatedByName && (
+              <>
+                {" "}
+                Kali terakhir dikemas kini oleh {
+                  settings.data.updatedByName
+                },{" "}
+                <DateDisplay value={settings.data.updatedAt} kind="datetime" />.
+              </>
+            )}
+          </p>
+          {message && <Notice tone={message.tone}>{message.text}</Notice>}
+        </form>
+      )}
+    </Section>
   )
 }

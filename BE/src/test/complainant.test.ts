@@ -46,6 +46,9 @@ type ProtectionRequest = {
   requestedByEmail?: string;
 };
 
+/** Identity a named portal submission needs; tests override it as required. */
+const CITIZEN = { nationality: "WARGANEGARA", icNo: "900101-14-5678" };
+
 let ctx: TestContext;
 let kui: Client;
 let seq = 0;
@@ -70,7 +73,11 @@ async function submit(
   seq += 1;
   return ctx.anonymous.post<PublicComplaint>("/complaints", {
     caseDescription: `Aduan portal ujian ${seq} ${"z".repeat(seq)}`,
-    complainant,
+    // A named portal complainant must identify themselves (§8 decision 12).
+    complainant:
+      !complainant || complainant.isAnonymous
+        ? complainant
+        : { ...CITIZEN, ...complainant },
     disclaimerAcknowledged: true,
     duplicateCheckAcknowledged: true,
     ...extra,
@@ -183,6 +190,70 @@ describe("portal submission (§8 decision 3)", () => {
     assert.ok(acks[0]!.subject.includes(created.complaintRefNo));
   });
 
+  it("named: a citizen needs an IC number, a non-citizen a passport number", async () => {
+    const post = (complainant: Record<string, unknown>) => {
+      seq += 1;
+      return ctx.anonymous.post<PublicComplaint>("/complaints", {
+        caseDescription: `Aduan warganegara ${seq} ${"w".repeat(seq)}`,
+        complainant: { particulars: "Pengadu Dokumen", ...complainant },
+        disclaimerAcknowledged: true,
+        duplicateCheckAcknowledged: true,
+      });
+    };
+    const before = await complaintCount();
+    for (const [complainant, field] of [
+      [{}, "nationality"],
+      [{ nationality: "WARGANEGARA" }, "icNo"],
+      // A passport doesn't stand in for a citizen's IC number, nor the reverse.
+      [{ nationality: "WARGANEGARA", passportNo: "A1234567" }, "icNo"],
+      [{ nationality: "BUKAN_WARGANEGARA" }, "passportNo"],
+      [
+        { nationality: "BUKAN_WARGANEGARA", icNo: "900101145678" },
+        "passportNo",
+      ],
+      // Only the two options exist.
+      [{ nationality: "Malaysia", icNo: "900101145678" }, "nationality"],
+    ] as const) {
+      const res = await post(complainant);
+      assert.equal(res.status, 422, JSON.stringify(complainant));
+      assert.match(
+        res.body.error ?? "",
+        new RegExp(field),
+        JSON.stringify(res.body),
+      );
+    }
+    assert.equal(await complaintCount(), before);
+
+    // The other document is optional, not refused.
+    expectStatus(
+      await post({
+        nationality: "WARGANEGARA",
+        icNo: "900101-14-5678",
+        passportNo: "A1234567",
+      }),
+      201,
+    );
+    const foreigner = expectStatus(
+      await post({ nationality: "BUKAN_WARGANEGARA", passportNo: "b7654321" }),
+      201,
+    );
+    const { rows } = await ctx.sql<{
+      nationality: string;
+      passport_no: string;
+      ic_no: string | null;
+    }>(
+      `SELECT p.nationality, p.passport_no, p.ic_no
+         FROM complaints c JOIN complainants p ON p.id = c.complainant_id
+        WHERE c.complaint_ref_no = $1`,
+      [foreigner.complaintRefNo],
+    );
+    assert.deepEqual(rows[0], {
+      nationality: "BUKAN_WARGANEGARA",
+      passport_no: "B7654321",
+      ic_no: null,
+    });
+  });
+
   it("refuses a submission without the disclaimer acknowledged", async () => {
     const before = await complaintCount();
     const complainant = { particulars: "Ali", contactEmail: "ali@contoh.my" };
@@ -195,44 +266,54 @@ describe("portal submission (§8 decision 3)", () => {
     assert.equal(await complaintCount(), before);
   });
 
-  it("anonymous: requires a contact email and stores no name or particulars", async () => {
+  it("anonymous: stores no complainant details at all, not even an email", async () => {
     const before = await complaintCount();
-    assert.equal((await submit({ isAnonymous: true })).status, 422);
-    assert.equal(
-      (
-        await submit({
-          isAnonymous: true,
-          contactEmail: "tanpanama@contoh.my",
-          particulars: "Nama Sebenar",
-        })
-      ).status,
-      422,
-    );
+    for (const detail of [
+      { particulars: "Nama Sebenar" },
+      { contactEmail: "tanpanama@contoh.my" },
+      { contactPhone: "012-3456789" },
+      { contactPhone2: "011-1111111" },
+      { complainantCategory: "ORANG_AWAM" },
+      { gradeLevel: "EKSEKUTIF" },
+    ]) {
+      const res = await submit({ isAnonymous: true, ...detail });
+      assert.equal(res.status, 422, JSON.stringify(detail));
+    }
     assert.equal(await complaintCount(), before);
 
-    const created = expectStatus(
-      await submit({
-        isAnonymous: true,
-        contactEmail: "tanpanama@contoh.my",
-        gradeLevel: "EKSEKUTIF",
-      }),
-      201,
-    );
-    const { rows } = await ctx.sql<{
-      particulars: string | null;
-      is_anonymous: boolean;
-      contact_email: string;
-    }>(
-      `SELECT p.particulars, p.is_anonymous, p.contact_email
+    // §8 decision 11: like a surat layang. Nothing is sent, and the reference
+    // number in the response is the only handle.
+    const emailsBefore = ctx.emails.length;
+    const created = expectStatus(await submit({ isAnonymous: true }), 201);
+    assert.match(created.complaintRefNo, /^UI\/\d{4}\/\d{5}$/);
+    assert.equal(ctx.emails.length, emailsBefore);
+    const { rows } = await ctx.sql<Record<string, unknown>>(
+      `SELECT p.is_anonymous, p.particulars, p.grade_level, p.complainant_category,
+              p.contact_email, p.contact_phone, p.contact_phone_2
          FROM complaints c JOIN complainants p ON p.id = c.complainant_id
         WHERE c.complaint_ref_no = $1`,
       [created.complaintRefNo],
     );
     assert.deepEqual(rows[0], {
-      particulars: null,
       is_anonymous: true,
-      contact_email: "tanpanama@contoh.my",
+      particulars: null,
+      grade_level: null,
+      complainant_category: null,
+      contact_email: null,
+      contact_phone: null,
+      contact_phone_2: null,
     });
+
+    // The database refuses details on an anonymous row, whatever the API does.
+    for (const column of ["particulars", "contact_email", "contact_phone"]) {
+      await assert.rejects(
+        ctx.sql(
+          `INSERT INTO complainants (is_anonymous, ${column}) VALUES (true, 'x@contoh.my')`,
+        ),
+        /chk_anonymous_no_(name|details)/,
+        column,
+      );
+    }
   });
 
   it("Lampiran 2: stores the form's fields; the response stays public-safe", async () => {
@@ -243,7 +324,7 @@ describe("portal submission (§8 decision 3)", () => {
           complainantCategory: "WARGA_AGENSI",
           icNo: "880202105555",
           gender: "LELAKI",
-          nationality: "Malaysia",
+          nationality: "WARGANEGARA",
           contactEmail: "borang@contoh.my",
           contactPhone2: "019-8765432",
           occupation: "Pegawai Tadbir",
@@ -254,7 +335,6 @@ describe("portal submission (§8 decision 3)", () => {
           accused2Particulars: "Pihak Kedua",
           incidentDate: "2026-01-05",
           incidentTime: "09:15",
-          hasSupportingDocuments: false,
         },
       ),
       201,
@@ -277,7 +357,8 @@ describe("portal submission (§8 decision 3)", () => {
       accused2_particulars: "Pihak Kedua",
       incident_date: "2026-01-05",
       incident_time: "09:15:00",
-      has_supporting_documents: false,
+      // No ADA/TIADA on the portal: set only when files are attached.
+      has_supporting_documents: null,
     });
   });
 
@@ -289,16 +370,12 @@ describe("portal submission (§8 decision 3)", () => {
       { age: 40 },
       { gender: "LELAKI" },
       { race: "Cina" },
-      { nationality: "Malaysia" },
+      { nationality: "WARGANEGARA" },
       { postalAddress: "Alamat" },
       { occupation: "Guru" },
       { employer: "Sekolah" },
     ]) {
-      const res = await submit({
-        isAnonymous: true,
-        contactEmail: "tanpanama.borang@contoh.my",
-        ...extra,
-      });
+      const res = await submit({ isAnonymous: true, ...extra });
       assert.equal(res.status, 422, JSON.stringify(extra));
     }
     assert.equal(await complaintCount(), before);
@@ -306,21 +383,10 @@ describe("portal submission (§8 decision 3)", () => {
     // The database refuses it too, whatever the API does.
     await assert.rejects(
       ctx.sql(
-        `INSERT INTO complainants (is_anonymous, contact_email, ic_no)
-         VALUES (true, 'x@contoh.my', '880202105555')`,
+        `INSERT INTO complainants (is_anonymous, ic_no)
+         VALUES (true, '880202105555')`,
       ),
       /chk_anonymous_identity/,
-    );
-
-    // Category and a second phone don't identify the person, and are kept.
-    expectStatus(
-      await submit({
-        isAnonymous: true,
-        contactEmail: "tanpanama.borang@contoh.my",
-        complainantCategory: "ORANG_AWAM",
-        contactPhone2: "011-1111111",
-      }),
-      201,
     );
   });
 
@@ -526,7 +592,6 @@ describe("my complaints (rules 2 and 9)", () => {
   const B = "pengadu.b@contoh.my";
   let a1: PublicComplaint;
   let aNfa: PublicComplaint;
-  let aAnon: PublicComplaint;
   let b1: PublicComplaint;
   let clientA: Client;
   let clientB: Client;
@@ -534,10 +599,6 @@ describe("my complaints (rules 2 and 9)", () => {
   before(async () => {
     a1 = await submitAs(A);
     aNfa = await submitAs(A);
-    aAnon = expectStatus(
-      await submit({ isAnonymous: true, contactEmail: A }),
-      201,
-    );
     b1 = await submitAs(B);
 
     await decide(a1.complaintRefNo, "TINDAKAN_SPRM", "RINGKASAN-JMM-RAHSIA");
@@ -562,10 +623,9 @@ describe("my complaints (rules 2 and 9)", () => {
     const res = await clientA.get<PublicComplaint[]>("/complainant/complaints");
     const list = expectStatus(res, 200);
 
-    assert.deepEqual(
-      list.map((c) => c.complaintRefNo).sort(),
-      [a1.complaintRefNo, aAnon.complaintRefNo].sort(),
-    );
+    assert.deepEqual(list.map((c) => c.complaintRefNo).sort(), [
+      a1.complaintRefNo,
+    ]);
     for (const item of list) {
       assert.deepEqual(sortedKeys(item), PUBLIC_COMPLAINT_KEYS);
     }
@@ -596,7 +656,11 @@ describe("my complaints (rules 2 and 9)", () => {
       `/complainant/complaints/${refPath(a1.complaintRefNo)}`,
     );
     const detail = expectStatus(own, 200);
-    assert.deepEqual(sortedKeys(detail), PUBLIC_COMPLAINT_KEYS);
+    // A single complaint adds its status timeline (§8 decision 13).
+    assert.deepEqual(
+      sortedKeys(detail),
+      [...PUBLIC_COMPLAINT_KEYS, "timeline"].sort(),
+    );
     assert.equal(detail.status, "DALAM_TINDAKAN");
     assert.ok(!JSON.stringify(own.body).includes("RAHSIA"));
 

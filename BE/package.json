@@ -13,13 +13,13 @@
     "test": "tsx --test --test-concurrency=1 src/test/*.test.ts",
     "staff": "tsx src/scripts/staff.ts",
     "db:migrate": "tsx src/scripts/db.ts migrate",
-    "db:reset": "tsx src/scripts/db.ts reset",
-    "db:seed": "tsx src/scripts/seed.ts"
+    "db:reset": "tsx src/scripts/db.ts reset"
   },
   "dependencies": {
     "cookie-parser": "^1.4.7",
     "cors": "^2.8.5",
     "express": "^5.1.0",
+    "multer": "^2.4.0",
     "pg": "^8.23.0",
     "zod": "^4.1.12"
   },
@@ -28,6 +28,7 @@
     "@types/cookie-parser": "^1.4.10",
     "@types/cors": "^2.8.19",
     "@types/express": "^5.0.4",
+    "@types/multer": "^2.2.0",
     "@types/node": "^20",
     "@types/pg": "^8.23.1",
     "eslint": "^10",

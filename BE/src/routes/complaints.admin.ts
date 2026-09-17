@@ -18,6 +18,7 @@ import {
   findDuplicateCandidates,
   getComplaintById,
   listComplaints,
+  listStatusHistory,
   updateComplaint,
 } from "../db/queries/complaints.js";
 import {
@@ -31,7 +32,24 @@ import {
 } from "../db/queries/caseActions.js";
 import { getComplainantById } from "../db/queries/complainants.js";
 import {
+  addStaffAttachments,
+  getAttachment,
+  isAnonymousComplaint,
+  listAttachments,
+} from "../db/queries/attachments.js";
+import {
+  acceptFiles,
+  inspectFiles,
+  removeStoredFiles,
+  storeFiles,
+  storedPath,
+  uploadDir,
+  uploadedFiles,
+} from "../attachments/files.js";
+import {
   toAdminComplaint,
+  toAttachment,
+  toStatusTimeline,
   toCaseAction,
   toComplainant,
   toDecisionWithSignatures,
@@ -112,13 +130,16 @@ adminComplaintsRouter.get("/:id", async (req, res) => {
   const complaint = await getComplaintById(id);
   if (!complaint) throw new HttpError(404, "Aduan tidak dijumpai");
 
-  const [decisions, caseActions, complainant] = await Promise.all([
-    listDecisionsWithSignatures(id),
-    listCaseActions(id),
-    complaint.complainant_id
-      ? getComplainantById(complaint.complainant_id)
-      : undefined,
-  ]);
+  const [decisions, caseActions, complainant, attachments, history] =
+    await Promise.all([
+      listDecisionsWithSignatures(id),
+      listCaseActions(id),
+      complaint.complainant_id
+        ? getComplainantById(complaint.complainant_id)
+        : undefined,
+      listAttachments(id),
+      listStatusHistory(id),
+    ]);
 
   res.json({
     data: {
@@ -126,9 +147,86 @@ adminComplaintsRouter.get("/:id", async (req, res) => {
       complainant: complainant ? toComplainant(complainant) : null,
       decisions: decisions.map(toDecisionWithSignatures),
       caseActions: caseActions.map(toCaseAction),
+      attachments: attachments.map(toAttachment),
+      timeline: toStatusTimeline(history),
     },
   });
 });
+
+/**
+ * Supporting documents (§8 decision 10). Always a download, never rendered
+ * inline: `attachment` disposition, nosniff, and a sandbox CSP, so a PDF or
+ * a file that isn't what it claims can't run in the console's origin.
+ */
+adminComplaintsRouter.get(
+  "/:id/attachments/:attachmentId/download",
+  async (req, res) => {
+    const id = idSchema.parse(req.params.id);
+    const attachmentId = idSchema.parse(req.params.attachmentId);
+
+    const attachment = await getAttachment(id, attachmentId);
+    if (!attachment) throw new HttpError(404, "Dokumen tidak dijumpai");
+
+    const asciiName = attachment.original_name.replace(
+      /[^\x20-\x7e]|["\\]/g,
+      "_",
+    );
+    res.sendFile(
+      attachment.storage_key,
+      {
+        root: uploadDir(),
+        dotfiles: "deny",
+        headers: {
+          "Content-Type": attachment.mime_type,
+          "Content-Disposition": `attachment; filename="${asciiName}"; filename*=UTF-8''${encodeURIComponent(attachment.original_name)}`,
+          "X-Content-Type-Options": "nosniff",
+          "Content-Security-Policy": "sandbox; default-src 'none'",
+          "Cache-Control": "private, no-store",
+        },
+      },
+      (err) => {
+        if (!err) return;
+        if (res.headersSent) return;
+        // The row exists but the file is gone: say so rather than 500.
+        console.error(
+          "Fail dokumen hilang:",
+          storedPath(attachment.storage_key),
+          err,
+        );
+        res
+          .status(404)
+          .json({ error: "Fail dokumen tidak dijumpai pada pelayan" });
+      },
+    );
+  },
+);
+
+/** Staff add documents to an existing case, e.g. ones the complainant emailed. */
+adminComplaintsRouter.post(
+  "/:id/attachments",
+  acceptFiles,
+  async (req, res) => {
+    const id = idSchema.parse(req.params.id);
+    const files = uploadedFiles(req);
+    if (!files.length)
+      throw new HttpError(422, "Pilih sekurang-kurangnya satu fail");
+
+    const anonymous = await isAnonymousComplaint(id);
+    if (anonymous === undefined)
+      throw new HttpError(404, "Aduan tidak dijumpai");
+
+    const checked = inspectFiles(files, { stripMetadata: anonymous });
+    const stored = await storeFiles(checked);
+    let rows;
+    try {
+      rows = await addStaffAttachments(id, stored, req.staff!.id);
+    } catch (err) {
+      await removeStoredFiles(stored);
+      throw err;
+    }
+    res.status(201).json({ data: rows.map(toAttachment) });
+  },
+);
 
 adminComplaintsRouter.patch("/:id", async (req, res) => {
   const id = idSchema.parse(req.params.id);

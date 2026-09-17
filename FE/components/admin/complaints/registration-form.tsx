@@ -187,10 +187,6 @@ function localErrors(form: FormState): Errors {
   if (form.incidentDate && form.incidentDate > todayIso()) {
     errors.incidentDate = "Tarikh kejadian tidak boleh pada masa hadapan"
   }
-  if (anonymous && !form.complainant.contactEmail.trim()) {
-    errors.contactEmail =
-      "Aduan tanpa nama memerlukan e-mel supaya pengadu boleh dihubungi"
-  }
   return errors
 }
 
@@ -307,20 +303,20 @@ export function RegistrationForm() {
             </div>
           </fieldset>
 
-          {form.complainantMode !== "NONE" && (
+          {form.complainantMode === "NAMED" && (
             <ComplainantDetailsFields
               value={form.complainant}
               onChange={updateComplainant}
               errors={errors}
-              anonymous={form.complainantMode === "ANONYMOUS"}
               audience="staff"
-              emailRequired={form.complainantMode === "ANONYMOUS"}
-              emailDescription={
-                form.complainantMode === "ANONYMOUS"
-                  ? "Satu-satunya saluran untuk menghubungi pengadu tanpa nama. Nama dan butiran peribadi tidak disimpan."
-                  : "Untuk makluman status melalui e-mel."
-              }
+              emailDescription="Untuk makluman status melalui e-mel."
             />
+          )}
+          {form.complainantMode === "ANONYMOUS" && (
+            <Notice tone="info">
+              Aduan tanpa nama tidak menyimpan sebarang butiran pengadu —
+              termasuk e-mel dan telefon — jadi pengadu tidak dapat dihubungi.
+            </Notice>
           )}
         </Section>
 
@@ -385,6 +381,7 @@ export function RegistrationForm() {
             <SupportingDocumentsField
               value={form.hasSupportingDocuments}
               onChange={(v) => update("hasSupportingDocuments", v)}
+              description="Muat naik fail di bahagian Dokumen sokongan pada fail kes selepas aduan didaftarkan."
             />
           </div>
         </Section>
@@ -511,7 +508,7 @@ function DuplicateReview({
   return (
     <section
       aria-labelledby="duplicate-heading"
-      className="flex flex-col gap-4 rounded-xl border border-accent/60 bg-status-dalam-tindakan/40 p-4 md:p-5"
+      className="flex flex-col gap-4 surface-card border-accent/60 bg-status-dalam-tindakan/40 p-4 md:p-5"
     >
       <div className="flex items-start gap-3">
         <AlertTriangleIcon

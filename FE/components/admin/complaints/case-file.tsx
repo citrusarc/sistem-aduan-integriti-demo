@@ -3,9 +3,9 @@
 import * as React from "react"
 import Link from "next/link"
 import { usePathname, useRouter, useSearchParams } from "next/navigation"
-import { CheckCheckIcon } from "lucide-react"
 
 import { CaseActions } from "@/components/admin/complaints/case-actions"
+import { CaseDocuments } from "@/components/admin/complaints/case-documents"
 import { DecisionCard } from "@/components/admin/complaints/decision-card"
 import { BackLink } from "@/components/ui/back-link"
 import { Button } from "@/components/ui/button"
@@ -15,6 +15,7 @@ import { PageHeader } from "@/components/ui/page-header"
 import { DetailList, Notice, Section } from "@/components/ui/section"
 import { EmptyState, ErrorState, LoadingState } from "@/components/ui/states"
 import { StatusPill } from "@/components/ui/status-pill"
+import { StatusTimeline } from "@/components/ui/status-timeline"
 import { useApiData } from "@/hooks/use-api-data"
 import { adminApi } from "@/lib/api"
 import type { AdminComplaintDetail, Complainant } from "@/types/entities"
@@ -22,6 +23,7 @@ import {
   COMPLAINANT_CATEGORY,
   COMPLAINT_DIRECTED_TO,
   GENDER,
+  NATIONALITY,
   GRADE_LEVEL_GROUP,
   INFO_CLASSIFICATION,
   INTEGRITY_CATEGORY,
@@ -112,10 +114,7 @@ function CaseFileView({
         }
         actions={
           canClose ? (
-            <Button onClick={() => setClosing(true)}>
-              <CheckCheckIcon data-icon="inline-start" />
-              Tutup kes
-            </Button>
+            <Button onClick={() => setClosing(true)}>Tutup kes</Button>
           ) : undefined
         }
       />
@@ -253,6 +252,24 @@ function CaseFileView({
       </Section>
 
       <Section
+        title="Sejarah status"
+        description="Setiap perubahan status, terkini di atas. Pengadu melihat garis masa yang sama di portal (kecuali kes NFA, yang tidak didedahkan)."
+      >
+        <StatusTimeline entries={complaint.timeline} />
+      </Section>
+
+      <Section
+        title="Dokumen sokongan"
+        description="Muat turun sahaja — fail tidak dibuka dalam pelayar. Dilihat oleh Unit Integriti sahaja."
+      >
+        <CaseDocuments
+          complaintId={complaint.id}
+          attachments={complaint.attachments}
+          onChanged={reload}
+        />
+      </Section>
+
+      <Section
         title="Keputusan JMM"
         description="Keputusan dimuktamadkan apabila Pengerusi dan sekurang-kurangnya seorang Ahli menandatangani, dan semua slot ditandatangani."
       >
@@ -358,7 +375,7 @@ function ComplainantDetails({
         { label: "Umur", value: p.age === null ? null : String(p.age) },
         { label: "Jantina", value: optional(GENDER, p.gender) },
         { label: "Bangsa", value: p.race },
-        { label: "Warganegara", value: p.nationality },
+        { label: "Warganegara", value: optional(NATIONALITY, p.nationality) },
         ...contact,
         { label: "Pekerjaan", value: p.occupation },
         { label: "Agensi / syarikat majikan", value: p.employer },

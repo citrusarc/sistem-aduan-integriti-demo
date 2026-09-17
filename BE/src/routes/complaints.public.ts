@@ -5,11 +5,20 @@ import { complaintRefNoSchema } from "../validation/common.js";
 import { publicCreateComplaintSchema } from "../validation/complaints.js";
 import { notifyByEmail } from "../notify/email.js";
 import {
+  acceptFiles,
+  inspectFiles,
+  removeStoredFiles,
+  requestBody,
+  storeFiles,
+  uploadedFiles,
+} from "../attachments/files.js";
+import {
   createComplaint,
   findDuplicateCandidates,
   getPubliclyDisclosableComplaintByRefNo,
+  listStatusHistory,
 } from "../db/queries/complaints.js";
-import { toPublicComplaint } from "../db/mappers.js";
+import { toPublicComplaint, toStatusTimeline } from "../db/mappers.js";
 import { malaysiaToday } from "../db/reportPeriod.js";
 
 /**
@@ -21,17 +30,27 @@ import { malaysiaToday } from "../db/reportPeriod.js";
 export const publicComplaintsRouter: Router = Router();
 
 /**
- * §8 decision 3 — the complainant block (named, or anonymous with a contact
- * email) and the disclaimer acknowledgement are required; see
+ * §8 decisions 3, 10 and 11 — the complainant block (named, or anonymous with
+ * no details at all) and the disclaimer acknowledgement are required; see
  * publicCreateComplaintSchema.
+ *
+ * JSON, or multipart/form-data with the same JSON in `payload` and supporting
+ * documents in `files`. Files are checked with the body but written to disk
+ * only once the complaint is certain to be registered.
  */
-publicComplaintsRouter.post("/", async (req, res) => {
-  const parsed = publicCreateComplaintSchema.safeParse(req.body);
+publicComplaintsRouter.post("/", acceptFiles, async (req, res) => {
+  const parsed = publicCreateComplaintSchema.safeParse(requestBody(req));
   if (!parsed.success) {
     throw new HttpError(422, z.prettifyError(parsed.error));
   }
 
   const body = parsed.data;
+  const files = uploadedFiles(req);
+  // Type check (and, for anonymous complainants, metadata stripping) before
+  // the duplicate check, so a bad file is reported on the first attempt.
+  const checkedFiles = inspectFiles(files, {
+    stripMetadata: body.complainant.isAnonymous,
+  });
 
   /**
    * Business rule 5 — never silently register a possible repeat as new.
@@ -68,16 +87,27 @@ publicComplaintsRouter.post("/", async (req, res) => {
   // it's made — so it's dated, received and filed under today. When the
   // incident happened is the complainant's own `incidentDate`.
   const today = malaysiaToday();
-  const complaint = await createComplaint({
-    ...body,
-    sourceChannel: "SAI",
-    receivedVia: "SISTEM_ADUAN_INTEGRITI",
-    complaintDate: today.date,
-    receivedDateUi: today.date,
-    reportYear: today.reportYear,
-    reportMonth: today.reportMonth,
-    disclaimerAcknowledged: true,
-  });
+  const attachments = await storeFiles(checkedFiles);
+  let complaint;
+  try {
+    complaint = await createComplaint({
+      ...body,
+      sourceChannel: "SAI",
+      receivedVia: "SISTEM_ADUAN_INTEGRITI",
+      complaintDate: today.date,
+      receivedDateUi: today.date,
+      reportYear: today.reportYear,
+      reportMonth: today.reportMonth,
+      disclaimerAcknowledged: true,
+      // DOKUMEN SOKONGAN: ADA when something was attached. The portal doesn't
+      // ask; without files it isn't stated (NULL), not TIADA.
+      hasSupportingDocuments: attachments.length ? true : null,
+      attachments,
+    });
+  } catch (err) {
+    await removeStoredFiles(attachments);
+    throw err;
+  }
 
   // Acknowledgement with the reference number, by email only (rule 10) — and
   // only when there is an email. A phone number is never contacted.
@@ -120,5 +150,12 @@ publicComplaintsRouter.get("/:refNo", async (req, res) => {
     throw new HttpError(404, "Aduan tidak dijumpai");
   }
 
-  res.json({ data: toPublicComplaint(complaint) });
+  // §8 decision 13: status and time per step, nothing else.
+  const history = await listStatusHistory(complaint.id);
+  res.json({
+    data: {
+      ...toPublicComplaint(complaint),
+      timeline: toStatusTimeline(history),
+    },
+  });
 });

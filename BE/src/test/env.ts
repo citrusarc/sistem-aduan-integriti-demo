@@ -7,6 +7,9 @@
  * `_test` appended to the database name. Tests DROP and recreate it, so the
  * name must end in `_test` and it must be local; anything else is refused.
  */
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import { assertResettable } from "../db/migrate.js";
 
 try {
@@ -40,5 +43,9 @@ if (!dbName.endsWith("_test")) {
 assertResettable(TEST_DATABASE_URL);
 
 process.env.DATABASE_URL = TEST_DATABASE_URL;
+// Uploaded test files go to a throwaway directory, never the real UPLOAD_DIR.
+process.env.UPLOAD_DIR = mkdtempSync(
+  path.join(tmpdir(), "aduan-uploads-test-"),
+);
 // Lets the harness capture outbound email instead of printing it.
 process.env.NODE_ENV = "test";

@@ -7,11 +7,14 @@ import { UsersIcon } from "lucide-react"
 import { useStaffSession } from "@/components/providers/staff-session"
 import { Button } from "@/components/ui/button"
 import { FormField } from "@/components/ui/field"
-import { Input } from "@/components/ui/input"
 import { PageHeader } from "@/components/ui/page-header"
 import { DetailList, Notice, Section } from "@/components/ui/section"
 import { ApiRequestError } from "@/lib/api"
-import { changePassword, MIN_PASSWORD_LENGTH } from "@/lib/auth"
+import { changePassword, meetsPasswordPolicy } from "@/lib/auth"
+import {
+  PasswordInput,
+  PasswordRequirements,
+} from "@/components/ui/password-input"
 import { errorMessage } from "@/lib/errors"
 import { STAFF_ROLE } from "@/types/enums"
 
@@ -40,7 +43,7 @@ export function AccountSettings() {
 
       <Section
         title="Tukar kata laluan"
-        description="Sesi anda di peranti lain akan dilog keluar."
+        description="Kata laluan luput selepas tempoh yang ditetapkan oleh ADMIN (asal 180 hari). Sesi anda di peranti lain akan dilog keluar."
       >
         <PasswordForm />
       </Section>
@@ -73,15 +76,16 @@ function PasswordForm() {
     text: string
   } | null>(null)
 
-  const tooShort = next.length > 0 && next.length < MIN_PASSWORD_LENGTH
   const mismatch = confirm.length > 0 && confirm !== next
 
   async function save(event: React.FormEvent) {
     event.preventDefault()
-    if (!current || next.length < MIN_PASSWORD_LENGTH || next !== confirm) {
+    if (!current || !meetsPasswordPolicy(next) || next !== confirm) {
       setMessage({
         tone: "error",
-        text: "Lengkapkan semua medan dengan betul.",
+        text: !meetsPasswordPolicy(next)
+          ? "Kata laluan baharu belum memenuhi semua syarat."
+          : "Lengkapkan semua medan dengan betul.",
       })
       return
     }
@@ -114,35 +118,26 @@ function PasswordForm() {
   return (
     <form onSubmit={save} noValidate className="flex max-w-md flex-col gap-4">
       <FormField label="Kata laluan semasa" required>
-        <Input
-          type="password"
+        <PasswordInput
           autoComplete="current-password"
           value={current}
           onChange={(e) => setCurrent(e.target.value)}
         />
       </FormField>
-      <FormField
-        label="Kata laluan baharu"
-        required
-        description={`Sekurang-kurangnya ${MIN_PASSWORD_LENGTH} aksara.`}
-        error={
-          tooShort ? `Sekurang-kurangnya ${MIN_PASSWORD_LENGTH} aksara` : null
-        }
-      >
-        <Input
-          type="password"
+      <FormField label="Kata laluan baharu" required>
+        <PasswordInput
           autoComplete="new-password"
           value={next}
           onChange={(e) => setNext(e.target.value)}
         />
       </FormField>
+      <PasswordRequirements password={next} />
       <FormField
         label="Sahkan kata laluan baharu"
         required
         error={mismatch ? "Kata laluan tidak sepadan" : null}
       >
-        <Input
-          type="password"
+        <PasswordInput
           autoComplete="new-password"
           value={confirm}
           onChange={(e) => setConfirm(e.target.value)}

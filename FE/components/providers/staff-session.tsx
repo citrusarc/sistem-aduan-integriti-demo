@@ -5,8 +5,8 @@ import * as React from "react"
 import { UNAUTHORIZED_EVENT, type UnauthorizedEventDetail } from "@/lib/api"
 import {
   getCurrentStaff,
-  login as loginRequest,
   logout as logoutRequest,
+  setupFirstAdmin as setupRequest,
   type CurrentStaff,
 } from "@/lib/auth"
 
@@ -26,7 +26,14 @@ export type StaffSessionState =
 
 type StaffSessionValue = StaffSessionState & {
   refresh: () => Promise<void>
-  login: (email: string, password: string) => Promise<CurrentStaff>
+  /** The last sign-in step returned a session (§8 decision 14). */
+  signedIn: (staff: CurrentStaff) => void
+  /** First-run setup: creates the first ADMIN and signs them in. */
+  setupFirstAdmin: (input: {
+    fullName: string
+    email: string
+    password: string
+  }) => Promise<CurrentStaff>
   logout: () => Promise<void>
 }
 
@@ -72,11 +79,18 @@ export function StaffSessionProvider({
     return () => window.removeEventListener(UNAUTHORIZED_EVENT, onUnauthorized)
   }, [])
 
-  const login = React.useCallback(async (email: string, password: string) => {
-    const staff = await loginRequest(email, password)
+  const signedIn = React.useCallback((staff: CurrentStaff) => {
     setState({ status: "authenticated", staff })
-    return staff
   }, [])
+
+  const setupFirstAdmin = React.useCallback(
+    async (input: { fullName: string; email: string; password: string }) => {
+      const staff = await setupRequest(input)
+      setState({ status: "authenticated", staff })
+      return staff
+    },
+    []
+  )
 
   const logout = React.useCallback(async () => {
     await logoutRequest()
@@ -84,8 +98,8 @@ export function StaffSessionProvider({
   }, [])
 
   const value = React.useMemo(
-    () => ({ ...state, refresh, login, logout }),
-    [state, refresh, login, logout]
+    () => ({ ...state, refresh, signedIn, setupFirstAdmin, logout }),
+    [state, refresh, signedIn, setupFirstAdmin, logout]
   )
 
   return (

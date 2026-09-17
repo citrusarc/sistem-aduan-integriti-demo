@@ -12,6 +12,7 @@ import type {
   ComplaintDirectedTo,
   ComplaintStatus,
   Gender,
+  Nationality,
   GradeLevelGroup,
   InfoClassification,
   IntegrityCategory,
@@ -90,7 +91,7 @@ export type ComplainantInput = {
   age?: number | null
   gender?: Gender | null
   race?: string | null
-  nationality?: string | null
+  nationality?: Nationality | null
   contactPhone2?: string | null
   postalAddress?: string | null
   occupation?: string | null

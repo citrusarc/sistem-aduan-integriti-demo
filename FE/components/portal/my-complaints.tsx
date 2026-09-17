@@ -1,7 +1,7 @@
 "use client"
 
 import Link from "next/link"
-import { ChevronRightIcon, LogOutIcon, ShieldCheckIcon } from "lucide-react"
+import { ChevronRightIcon, ShieldCheckIcon } from "lucide-react"
 
 import {
   PROTECTION_STATUS_TEXT,
@@ -63,7 +63,7 @@ function MyComplaints() {
 
   return (
     <div className="flex flex-col gap-5">
-      <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-border bg-card px-4 py-3">
+      <div className="flex flex-wrap items-center justify-between gap-3 surface-card border-border/70 bg-card px-4 py-3">
         <p className="text-sm">
           Log masuk sebagai <strong>{email}</strong>
         </p>
@@ -72,7 +72,6 @@ function MyComplaints() {
             href="/submit/protection"
             className={buttonVariants({ variant: "outline", size: "sm" })}
           >
-            <ShieldCheckIcon data-icon="inline-start" />
             Mohon perlindungan
           </Link>
           <Button
@@ -80,7 +79,6 @@ function MyComplaints() {
             size="sm"
             onClick={() => void session.logout()}
           >
-            <LogOutIcon data-icon="inline-start" />
             Log keluar
           </Button>
         </div>
@@ -106,7 +104,7 @@ function MyComplaints() {
               <li key={c.complaintRefNo}>
                 <Link
                   href={`/me/complaints/${refToSlug(c.complaintRefNo)}`}
-                  className="group flex items-center gap-4 rounded-xl border border-border bg-card p-4 transition-colors hover:border-primary/40 hover:bg-muted/40 focus-visible:ring-3 focus-visible:ring-ring/30 focus-visible:outline-none"
+                  className="group flex surface-card-interactive items-center gap-4 surface-card border-border/70 bg-card p-4 hover:border-primary/30 focus-visible:ring-3 focus-visible:ring-ring/30 focus-visible:outline-none"
                 >
                   <div className="flex min-w-0 flex-1 flex-col gap-1.5">
                     <div className="flex flex-wrap items-center gap-2">

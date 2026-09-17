@@ -87,6 +87,21 @@ export function getDummyHash(): Promise<string> {
   return dummyHash;
 }
 
+/**
+ * §8 decision 14 (b): every password — including one ADMIN sets for someone
+ * else, and the first ADMIN's — has all four character categories. FE mirrors
+ * these rules in lib/auth.ts for its checklist; this is the enforcement.
+ */
+export const PASSWORD_RULES = [
+  { test: (p: string) => /[A-Z]/.test(p), message: "huruf besar (A-Z)" },
+  { test: (p: string) => /[a-z]/.test(p), message: "huruf kecil (a-z)" },
+  { test: (p: string) => /[0-9]/.test(p), message: "nombor (0-9)" },
+  {
+    test: (p: string) => /[^A-Za-z0-9\s]/.test(p),
+    message: "aksara khas (contohnya @ # $ % ^ &)",
+  },
+] as const;
+
 /** Returns an error message, or null when the password is acceptable. */
 export function checkPasswordPolicy(password: string): string | null {
   if (password.length < MIN_PASSWORD_LENGTH) {
@@ -94,6 +109,12 @@ export function checkPasswordPolicy(password: string): string | null {
   }
   if (password.length > MAX_PASSWORD_LENGTH) {
     return `Kata laluan tidak boleh melebihi ${MAX_PASSWORD_LENGTH} aksara`;
+  }
+  const missing = PASSWORD_RULES.filter((rule) => !rule.test(password)).map(
+    (rule) => rule.message,
+  );
+  if (missing.length) {
+    return `Kata laluan mesti mengandungi ${missing.join(", ")}`;
   }
   return null;
 }

@@ -3,13 +3,7 @@
 import * as React from "react"
 import Link from "next/link"
 import { usePathname } from "next/navigation"
-import {
-  LogOutIcon,
-  MenuIcon,
-  ShieldCheckIcon,
-  UserIcon,
-  XIcon,
-} from "lucide-react"
+import { LogOutIcon, MenuIcon, ShieldCheckIcon, XIcon } from "lucide-react"
 
 import { useComplainantSession } from "@/components/providers/complainant-session"
 import { Button, buttonVariants } from "@/components/ui/button"
@@ -20,7 +14,7 @@ const LINKS = [
   { href: "/", label: "Utama" },
   { href: "/submit", label: "Hantar Aduan" },
   { href: "/track", label: "Semak Status" },
-  { href: "/faq", label: "Soalan Lazim" },
+  { href: "/hubungi", label: "Hubungi Kami" },
 ] as const
 
 function isActive(pathname: string, href: string) {
@@ -131,9 +125,8 @@ function ComplainantMenu() {
 
   if (session.status !== "authenticated") {
     return (
-      <Link href="/me" className={buttonVariants({ variant: "outline" })}>
-        <UserIcon data-icon="inline-start" />
-        Log masuk pengadu
+      <Link href="/me" className={buttonVariants({ variant: "outline-cta" })}>
+        Log masuk / Daftar
       </Link>
     )
   }
@@ -141,7 +134,6 @@ function ComplainantMenu() {
   return (
     <div className="flex items-center gap-2">
       <Link href="/me" className={buttonVariants({ variant: "secondary" })}>
-        <UserIcon data-icon="inline-start" />
         Aduan saya
       </Link>
       <span

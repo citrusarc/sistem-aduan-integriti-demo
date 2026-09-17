@@ -72,7 +72,7 @@ export function Dashboard() {
           aria-label="Bilangan aduan mengikut status"
           className="grid gap-3 sm:grid-cols-3 lg:grid-cols-6"
         >
-          <div className="flex flex-col justify-between gap-2 rounded-xl border border-border bg-primary p-4 text-primary-foreground sm:col-span-3 lg:col-span-1">
+          <div className="flex flex-col justify-between gap-2 surface-card border-transparent bg-linear-to-br from-primary to-secondary p-4 text-primary-foreground sm:col-span-3 lg:col-span-1">
             <p className="text-sm text-primary-foreground/80">Jumlah aduan</p>
             <p className="text-5xl font-semibold tracking-tight">
               {nf.format(stats.data.total)}
@@ -83,7 +83,7 @@ export function Dashboard() {
               <Link
                 key={b.value}
                 href={`/complaints?status=${b.value}`}
-                className="group flex flex-col gap-2 rounded-xl border border-border bg-card p-4 transition-colors hover:border-primary/40 hover:bg-muted/40 focus-visible:ring-3 focus-visible:ring-ring/30 focus-visible:outline-none"
+                className="group flex surface-card-interactive flex-col gap-2 surface-card border-border/70 bg-card p-4 hover:border-primary/30 focus-visible:ring-3 focus-visible:ring-ring/30 focus-visible:outline-none"
               >
                 <span className="flex items-center gap-2 text-sm text-muted-foreground">
                   <span

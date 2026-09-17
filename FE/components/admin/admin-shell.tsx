@@ -11,7 +11,6 @@ import {
   InboxIcon,
   LayoutDashboardIcon,
   ListChecksIcon,
-  LogOutIcon,
   MenuIcon,
   SettingsIcon,
   ShieldCheckIcon,
@@ -231,7 +230,6 @@ function Sidebar({
             className="justify-start text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-foreground"
             onClick={onSignOut}
           >
-            <LogOutIcon data-icon="inline-start" />
             Log keluar
           </Button>
         </div>

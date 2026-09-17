@@ -12,6 +12,8 @@ import type { AgendaItemRow, MeetingListRow } from "./queries/jmmMeetings.js";
 import type { DecisionLogRow, QuorumState } from "./queries/jmmDecisions.js";
 import type { ReferredActionRow } from "./queries/caseActions.js";
 import type { StaffAccountRow } from "../auth/store.js";
+import type { AttachmentRow } from "./queries/attachments.js";
+import type { StatusHistoryRow } from "./queries/complaints.js";
 import type {
   AdminProtectionRequestRow,
   ComplainantProtectionRequestRow,
@@ -50,6 +52,19 @@ export function toPublicComplaint(row: ComplaintRow): PublicComplaint {
     integrityCategory: row.integrity_category,
     status: row.status,
   };
+}
+
+/**
+ * The status timeline (§8 decision 13): which status, and when. Nothing about
+ * who changed it or why, so it is as public-safe as the status itself. Only
+ * ever built for a complaint that already passed the disclosure check, which
+ * excludes every complaint that was ever NFA (rule 2).
+ */
+export function toStatusTimeline(rows: readonly StatusHistoryRow[]) {
+  return rows.map((row) => ({
+    status: row.to_status,
+    changedAt: row.changed_at,
+  }));
 }
 
 export function toAdminComplaint(row: ComplaintRow) {
@@ -110,6 +125,24 @@ export function toComplainant(row: ComplainantRow) {
     postalAddress: row.postal_address,
     occupation: row.occupation,
     employer: row.employer,
+    createdAt: row.created_at,
+  };
+}
+
+/**
+ * Integrity Unit only (rule 9). `storage_key` and `sha256` stay inside BE:
+ * files are fetched by id through the download route.
+ */
+export function toAttachment(row: AttachmentRow) {
+  return {
+    id: row.id,
+    originalName: row.original_name,
+    mimeType: row.mime_type,
+    sizeBytes: row.size_bytes,
+    /** null = the complainant, through the portal. */
+    uploadedBy: row.uploaded_by_staff_id
+      ? { staffId: row.uploaded_by_staff_id, fullName: row.uploaded_by_name }
+      : null,
     createdAt: row.created_at,
   };
 }
@@ -307,6 +340,8 @@ export function toStaffAccount(row: StaffAccountRow) {
     isActive: row.is_active,
     hasPassword: row.has_password,
     locked: row.locked,
+    /** §8 decision 14: the next login must set a new password. */
+    passwordChangeRequired: row.must_change_password || row.password_expired,
     lastLoginAt: row.last_login_at,
     passwordChangedAt: row.password_changed_at,
     createdAt: row.created_at,

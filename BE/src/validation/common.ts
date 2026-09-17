@@ -5,6 +5,7 @@ import {
   COMPLAINT_DIRECTED_TO,
   COMPLAINT_STATUS,
   GENDER,
+  NATIONALITY,
   GRADE_LEVEL_GROUP,
   INFO_CLASSIFICATION,
   INTEGRITY_CATEGORY,
@@ -41,6 +42,7 @@ export const complaintStatusSchema = z.enum(COMPLAINT_STATUS);
 export const jmmMeetingStatusSchema = z.enum(JMM_MEETING_STATUS);
 export const complainantCategorySchema = z.enum(COMPLAINANT_CATEGORY);
 export const genderSchema = z.enum(GENDER);
+export const nationalitySchema = z.enum(NATIONALITY);
 export const receivedViaSchema = z.enum(RECEIVED_VIA);
 
 /**

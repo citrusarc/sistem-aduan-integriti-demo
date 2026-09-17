@@ -4,13 +4,13 @@ import Link from "next/link"
 import { TrackLookup } from "@/components/portal/track-lookup"
 import { PageHeader } from "@/components/ui/page-header"
 
-export const metadata: Metadata = { title: "Semak Status Aduan" }
+export const metadata: Metadata = { title: "Semak Status" }
 
 export default function PortalTrackPage() {
   return (
     <div className="mx-auto flex w-full max-w-2xl flex-col gap-6">
       <PageHeader
-        title="Semak Status Aduan"
+        title="Semak Status"
         description="Masukkan nombor rujukan untuk melihat status aduan."
       />
       <TrackLookup />

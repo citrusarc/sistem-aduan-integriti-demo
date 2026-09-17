@@ -36,3 +36,6 @@ pnpm-debug.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# uploaded supporting documents (BE UPLOAD_DIR) — evidence, never committed
+BE/uploads/

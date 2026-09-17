@@ -2,14 +2,7 @@
 
 import * as React from "react"
 import Link from "next/link"
-import {
-  ArrowDownIcon,
-  ArrowUpIcon,
-  CheckCheckIcon,
-  GavelIcon,
-  PlusIcon,
-  XIcon,
-} from "lucide-react"
+import { ArrowDownIcon, ArrowUpIcon, XIcon } from "lucide-react"
 
 import { DecisionFormDialog } from "@/components/admin/jmm/decision-form"
 import { MeetingStatusBadge } from "@/components/admin/jmm/meeting-list"
@@ -153,7 +146,6 @@ function MeetingView({
           open ? (
             <>
               <Button variant="outline" onClick={() => setAdding(true)}>
-                <PlusIcon data-icon="inline-start" />
                 Tambah ke agenda
               </Button>
               <Button
@@ -165,7 +157,6 @@ function MeetingView({
                     : undefined
                 }
               >
-                <CheckCheckIcon data-icon="inline-start" />
                 Tandakan selesai
               </Button>
             </>
@@ -299,7 +290,6 @@ function MeetingView({
                               disabled={busy}
                               onClick={() => setDeciding(item)}
                             >
-                              <GavelIcon data-icon="inline-start" />
                               Rekod keputusan
                             </Button>
                           )}

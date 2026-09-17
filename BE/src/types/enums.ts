@@ -183,6 +183,10 @@ export type ComplainantCategory = (typeof COMPLAINANT_CATEGORY)[number];
 export const GENDER = ["LELAKI", "PEREMPUAN"] as const;
 export type Gender = (typeof GENDER)[number];
 
+// nationality_enum — db/migrations/013, Lampiran 2 "WARGANEGARA" (§8 decision 12)
+export const NATIONALITY = ["WARGANEGARA", "BUKAN_WARGANEGARA"] as const;
+export type Nationality = (typeof NATIONALITY)[number];
+
 // received_via_enum — db/migrations/010, Lampiran 2 "Cara aduan/ maklumat
 // diterima" (14 values, form order). NOT interchangeable with SOURCE_CHANNEL
 // (Masterlist) or JMM_SOURCE (BORANG JMM) — a third form, a third list.

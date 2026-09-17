@@ -24,7 +24,7 @@ function Section({
       id={id}
       aria-labelledby={headingId}
       className={cn(
-        "flex flex-col gap-4 rounded-xl border border-border bg-card p-4 md:p-5",
+        "flex flex-col gap-4 surface-card border-border/70 bg-card p-4 md:p-5",
         className
       )}
     >

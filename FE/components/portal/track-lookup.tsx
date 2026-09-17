@@ -1,7 +1,6 @@
 "use client"
 
 import * as React from "react"
-import { SearchIcon } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import { DateDisplay } from "@/components/ui/date-display"
@@ -10,13 +9,14 @@ import { Input } from "@/components/ui/input"
 import { Notice } from "@/components/ui/section"
 import { PUBLIC_STATUS_MEANING } from "@/components/portal/public-status"
 import { StatusPill } from "@/components/ui/status-pill"
+import { StatusTimeline } from "@/components/ui/status-timeline"
 import { ApiRequestError, publicApi } from "@/lib/api"
 import { errorMessage } from "@/lib/errors"
-import type { PublicComplaint } from "@/types/entities"
+import type { PublicComplaintDetail } from "@/types/entities"
 import { COMPLAINT_STATUS, INTEGRITY_CATEGORY, labelFor } from "@/types/enums"
 
 type Result =
-  | { kind: "found"; complaint: PublicComplaint }
+  | { kind: "found"; complaint: PublicComplaintDetail }
   | { kind: "not-found" }
   | { kind: "error"; message: string }
 
@@ -65,7 +65,7 @@ export function TrackLookup() {
       <form
         onSubmit={lookup}
         role="search"
-        className="flex flex-col gap-3 rounded-xl border border-border bg-card p-5 sm:flex-row sm:items-end"
+        className="flex flex-col gap-3 surface-card border-border/70 bg-card p-5 sm:flex-row sm:items-end"
       >
         <FormField
           label="No. rujukan aduan"
@@ -87,7 +87,6 @@ export function TrackLookup() {
           disabled={loading || !refNo.trim()}
           className="sm:mb-5"
         >
-          <SearchIcon data-icon="inline-start" />
           {loading ? "Menyemak…" : "Semak status"}
         </Button>
       </form>
@@ -96,7 +95,7 @@ export function TrackLookup() {
         {result?.kind === "found" && (
           <section
             aria-label="Status aduan"
-            className="flex flex-col gap-4 rounded-xl border border-border bg-card p-5"
+            className="flex flex-col gap-4 surface-card border-border/70 bg-card p-5"
           >
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div>
@@ -134,6 +133,12 @@ export function TrackLookup() {
                 </dd>
               </div>
             </dl>
+            <div className="flex flex-col gap-3 border-t border-border/70 pt-4">
+              <h2 className="text-sm font-semibold text-primary">
+                Sejarah status
+              </h2>
+              <StatusTimeline entries={result.complaint.timeline} />
+            </div>
           </section>
         )}
         {result?.kind === "not-found" && (

@@ -1,7 +1,6 @@
 "use client"
 
 import Link from "next/link"
-import { ShieldCheckIcon } from "lucide-react"
 
 import { RequireComplainant } from "@/components/portal/complainant-login"
 import {
@@ -16,6 +15,7 @@ import { DateDisplay } from "@/components/ui/date-display"
 import { DetailList, Notice, Section } from "@/components/ui/section"
 import { ErrorState, LoadingState } from "@/components/ui/states"
 import { StatusPill } from "@/components/ui/status-pill"
+import { StatusTimeline } from "@/components/ui/status-timeline"
 import { useApiData } from "@/hooks/use-api-data"
 import { ApiRequestError, complainantApi } from "@/lib/api"
 import { refToSlug } from "@/lib/ref-slug"
@@ -118,6 +118,10 @@ function Detail({ refNo }: { refNo: string }) {
         </p>
       </Section>
 
+      <Section title="Sejarah status" description="Terkini di atas.">
+        <StatusTimeline entries={c.timeline} />
+      </Section>
+
       <Section
         title="Permohonan perlindungan"
         actions={
@@ -126,7 +130,6 @@ function Detail({ refNo }: { refNo: string }) {
               href={`/submit/protection?aduan=${refToSlug(c.complaintRefNo)}`}
               className={buttonVariants({ variant: "outline", size: "sm" })}
             >
-              <ShieldCheckIcon data-icon="inline-start" />
               Mohon perlindungan
             </Link>
           ) : undefined
@@ -151,7 +154,7 @@ function Detail({ refNo }: { refNo: string }) {
             {mine.map((r) => (
               <li
                 key={r.id}
-                className="flex flex-col gap-2 rounded-lg border border-border p-3"
+                className="flex flex-col gap-2 rounded-xl border border-border/70 bg-muted/30 p-3"
               >
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <Badge

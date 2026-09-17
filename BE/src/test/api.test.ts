@@ -179,7 +179,11 @@ describe("status transitions", () => {
     const created = expectStatus<Record<string, unknown>>(
       await ctx.anonymous.post("/complaints", {
         caseDescription: "Aduan awam ujian status baru yang unik sekali",
-        complainant: { particulars: "Pengadu Awam" },
+        complainant: {
+          particulars: "Pengadu Awam",
+          nationality: "WARGANEGARA",
+          icNo: "900101145678",
+        },
         disclaimerAcknowledged: true,
         duplicateCheckAcknowledged: true,
       }),
@@ -713,10 +717,7 @@ describe("reference numbers", () => {
           i % 2 ? "/admin/complaints" : "/complaints",
           {
             caseDescription: `Aduan serentak ${i} ${"r".repeat(i * 5)} ${seq++}`,
-            complainant: {
-              isAnonymous: true,
-              contactEmail: `serentak${i}@ujian.my`,
-            },
+            complainant: { isAnonymous: true },
             disclaimerAcknowledged: true,
             duplicateCheckAcknowledged: true,
           },
@@ -733,7 +734,11 @@ describe("reference numbers", () => {
     const created = expectStatus<{ complaintRefNo: string }>(
       await ctx.anonymous.post("/complaints", {
         caseDescription: `Aduan portal medan dalaman ${seq++} ${"p".repeat(seq)}`,
-        complainant: { particulars: "Pengadu Portal" },
+        complainant: {
+          particulars: "Pengadu Portal",
+          nationality: "WARGANEGARA",
+          icNo: "900101145678",
+        },
         disclaimerAcknowledged: true,
         duplicateCheckAcknowledged: true,
         // None of these may be chosen by the public:
@@ -792,7 +797,7 @@ describe("BORANG ADUAN/ MAKLUMAT (Lampiran 2)", () => {
         age: 36,
         gender: "PEREMPUAN",
         race: "Melayu",
-        nationality: "Malaysia",
+        nationality: "WARGANEGARA",
         contactEmail: "lampiran2@contoh.my",
         contactPhone: "012-3456789",
         contactPhone2: "03-88889999",

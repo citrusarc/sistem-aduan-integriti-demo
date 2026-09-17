@@ -11,7 +11,7 @@ import { authRouter } from "./auth.js";
 import { complainantRouter } from "./complainant.js";
 import { adminProtectionRequestsRouter } from "./protectionRequests.admin.js";
 import { referralsRouter } from "./referrals.js";
-import { adminStaffRouter } from "./staff.admin.js";
+import { adminSettingsRouter, adminStaffRouter } from "./staff.admin.js";
 import { query } from "../db/client.js";
 
 export const apiRouter: Router = Router();
@@ -48,3 +48,5 @@ apiRouter.use("/admin/stats", adminStatsRouter);
 apiRouter.use("/admin/protection-requests", adminProtectionRequestsRouter);
 // ADMIN only — narrower than the Integrity Unit gate.
 apiRouter.use("/admin/staff", adminStaffRouter);
+// ADMIN only — security settings (§8 decision 14).
+apiRouter.use("/admin/settings", adminSettingsRouter);

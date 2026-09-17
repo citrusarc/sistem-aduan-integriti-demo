@@ -9,6 +9,16 @@ import { PROTECTION_REQUEST_STATUS } from "../types/enums.js";
 
 export const requestOtpSchema = z.object({ email: emailSchema });
 
+/** §8 decision 13. The code that confirms it is sent to `email`. */
+export const registerComplainantSchema = z.object({
+  email: emailSchema,
+  fullName: z
+    .string()
+    .trim()
+    .min(2, "Nama mesti sekurang-kurangnya 2 aksara")
+    .max(200),
+});
+
 export const verifyOtpSchema = z.object({
   email: emailSchema,
   code: z

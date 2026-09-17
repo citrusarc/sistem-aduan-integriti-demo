@@ -3,6 +3,7 @@ import type {
   AdminComplaintDetail,
   AdminProtectionRequest,
   CaseAction,
+  ComplaintAttachment,
   ComplainantProtectionRequest,
   ComplainantSession,
   ComplaintStats,
@@ -14,10 +15,12 @@ import type {
   JmmMeetingListEntry,
   OtpRequested,
   PublicComplaint,
+  PublicComplaintDetail,
   PublicComplaintSubmission,
   RecordedDecision,
   ReferralRecipient,
   ReferredAction,
+  SecuritySettings,
   SignSlotResult,
   StaffAccount,
 } from "@/types/entities"
@@ -107,6 +110,12 @@ const CREDENTIAL_ENDPOINTS = new Set([
   // A wrong *current* password on change is 401 too; the session is fine.
   "/auth/password",
   "/complainant/auth/verify",
+  // The steps of staff sign-in and reset (§8 decision 14): a 401 there is a
+  // wrong code or a spent token, never an expired session.
+  "/auth/login/verify",
+  "/auth/password/expired",
+  "/auth/forgot-password",
+  "/auth/reset-password",
 ])
 
 type Query = Record<string, string | number | boolean | null | undefined>
@@ -115,6 +124,8 @@ export type ApiInit = Omit<RequestInit, "body"> & {
   query?: Query
   /** JSON-encoded as the request body. */
   json?: unknown
+  /** Sent as multipart/form-data (the browser sets the boundary header). */
+  form?: FormData
 }
 
 function buildUrl(path: string, query?: Query): string {
@@ -134,7 +145,7 @@ function buildUrl(path: string, query?: Query): string {
  * ApiRequestError.
  */
 export async function api<T>(path: string, init: ApiInit = {}): Promise<T> {
-  const { query, json, headers, ...rest } = init
+  const { query, json, form, headers, ...rest } = init
   const url = buildUrl(path, query)
   let res: Response
   try {
@@ -146,7 +157,7 @@ export async function api<T>(path: string, init: ApiInit = {}): Promise<T> {
         ...(json !== undefined && { "Content-Type": "application/json" }),
         ...headers,
       },
-      body: json === undefined ? undefined : JSON.stringify(json),
+      body: form ?? (json === undefined ? undefined : JSON.stringify(json)),
     })
   } catch (err) {
     // An aborted request is the caller's decision, not a network failure.
@@ -195,15 +206,32 @@ export function possibleDuplicateCountOf(err: unknown): number | null {
 
 const ref = (refNo: string) => encodeURIComponent(refNo)
 
+/** BE's multipart shape: the JSON body in `payload`, documents in `files`. */
+function withFiles(body: unknown, files: readonly File[]): FormData {
+  const form = new FormData()
+  if (body !== undefined) form.append("payload", JSON.stringify(body))
+  for (const file of files) form.append("files", file, file.name)
+  return form
+}
+
 // ─── Public portal ───────────────────────────────────────────────────────────
 
 export const publicApi = {
   health: () => api<HealthStatus>("/health"),
-  submitComplaint: (body: PublicComplaintSubmission) =>
-    api<PublicComplaint>("/complaints", { method: "POST", json: body }),
+  /** With documents, sent as multipart; BE requires hasSupportingDocuments = true then. */
+  submitComplaint: (
+    body: PublicComplaintSubmission,
+    files: readonly File[] = []
+  ) =>
+    api<PublicComplaint>(
+      "/complaints",
+      files.length
+        ? { method: "POST", form: withFiles(body, files) }
+        : { method: "POST", json: body }
+    ),
   /** 404 for unknown and NFA reference numbers alike (rule 2). */
   trackComplaint: (refNo: string) =>
-    api<PublicComplaint>(`/complaints/${ref(refNo)}`),
+    api<PublicComplaintDetail>(`/complaints/${ref(refNo)}`),
 }
 
 // ─── Complainant (email OTP, cookie aduan_csid) ──────────────────────────────
@@ -214,6 +242,12 @@ export const complainantApi = {
       method: "POST",
       json: { email },
     }),
+  /** §8 decision 13: name + email; the emailed code is then entered at verify. */
+  register: (email: string, fullName: string) =>
+    api<OtpRequested>("/complainant/auth/register", {
+      method: "POST",
+      json: { email, fullName },
+    }),
   verify: (email: string, code: string) =>
     api<ComplainantSession>("/complainant/auth/verify", {
       method: "POST",
@@ -223,7 +257,7 @@ export const complainantApi = {
   me: () => api<ComplainantSession>("/complainant/auth/me"),
   complaints: () => api<PublicComplaint[]>("/complainant/complaints"),
   complaint: (refNo: string) =>
-    api<PublicComplaint>(`/complainant/complaints/${ref(refNo)}`),
+    api<PublicComplaintDetail>(`/complainant/complaints/${ref(refNo)}`),
   protectionRequests: () =>
     api<ComplainantProtectionRequest[]>("/complainant/protection-requests"),
   createProtectionRequest: (body: CreateProtectionRequestBody) =>
@@ -270,6 +304,18 @@ export const adminApi = {
         method: "POST",
         json: body,
       }),
+    /** Returns the case's full document list after the upload. */
+    uploadAttachments: (id: string, files: readonly File[]) =>
+      api<ComplaintAttachment[]>(`/admin/complaints/${id}/attachments`, {
+        method: "POST",
+        form: withFiles(undefined, files),
+      }),
+    /**
+     * A plain link: the browser downloads with the staff cookie, and BE sends
+     * it as an attachment, never inline.
+     */
+    attachmentDownloadUrl: (id: string, attachmentId: string) =>
+      buildUrl(`/admin/complaints/${id}/attachments/${attachmentId}/download`),
   },
 
   decisions: {
@@ -379,6 +425,18 @@ export const adminApi = {
       api<StaffAccount>(`/admin/staff/${id}/deactivate`, { method: "POST" }),
     activate: (id: string) =>
       api<StaffAccount>(`/admin/staff/${id}/activate`, { method: "POST" }),
+    /** Lifts a block from 5 failed passwords. */
+    unlock: (id: string) =>
+      api<StaffAccount>(`/admin/staff/${id}/unlock`, { method: "POST" }),
+  },
+
+  settings: {
+    security: () => api<SecuritySettings>("/admin/settings/security"),
+    updateSecurity: (passwordMaxAgeDays: number) =>
+      api<SecuritySettings>("/admin/settings/security", {
+        method: "PUT",
+        json: { passwordMaxAgeDays },
+      }),
   },
 }
 

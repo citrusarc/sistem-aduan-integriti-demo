@@ -1,13 +1,8 @@
+import Image from "next/image"
 import Link from "next/link"
-import {
-  FileTextIcon,
-  MailIcon,
-  SearchIcon,
-  ShieldCheckIcon,
-} from "lucide-react"
+import { MailIcon, SearchIcon, ShieldCheckIcon } from "lucide-react"
 
 import { buttonVariants } from "@/components/ui/button"
-import { cn } from "@/lib/utils"
 
 const POINTS = [
   {
@@ -49,37 +44,43 @@ const STEPS = [
 export default function PortalHomePage() {
   return (
     <div className="flex flex-col gap-12">
-      <section className="flex flex-col gap-5 rounded-2xl bg-primary px-6 py-10 text-primary-foreground md:px-10 md:py-14">
-        <p className="text-xs font-semibold tracking-wider text-accent uppercase">
+      {/* Text sits on a photo, so its colours are fixed white/navy rather than
+          theme tokens (dark-mode --primary is a light blue). */}
+      <section className="relative isolate flex flex-col gap-5 overflow-hidden surface-card border-transparent bg-[#1E3A5F] px-6 py-12 text-white md:min-h-104 md:justify-center md:px-12 md:py-16">
+        <Image
+          src="/images/hero-putrajaya.jpg"
+          alt=""
+          fill
+          priority
+          sizes="(min-width: 1152px) 1120px, 100vw"
+          className="-z-30 object-cover object-center"
+        />
+        {/* 15% dark layer over the whole photo. */}
+        <div aria-hidden className="absolute inset-0 -z-20 bg-black/15" />
+        {/* The photo is bright; this navy fade behind the copy keeps white text
+            readable while the right side of the photo stays visible. */}
+        <div
+          aria-hidden
+          className="absolute inset-0 -z-10 bg-linear-to-t from-[#1E3A5F]/90 via-[#1E3A5F]/60 to-[#1E3A5F]/20 md:bg-linear-to-r md:from-[#1E3A5F]/90 md:via-[#1E3A5F]/55 md:to-transparent"
+        />
+        <p className="w-fit rounded-full border border-white/20 bg-white/10 px-3 py-1 text-xs font-semibold tracking-wider text-[#E3C48F] uppercase backdrop-blur-sm">
           Unit Integriti
         </p>
         <h1 className="max-w-2xl text-3xl font-semibold tracking-tight md:text-4xl">
           Laporkan salah laku, rasuah atau salah guna kuasa dengan selamat.
         </h1>
-        <p className="max-w-xl text-primary-foreground/80">
+        <p className="max-w-xl text-white/85">
           Setiap aduan dinilai oleh Unit Integriti dan dibawa ke JMM untuk
           keputusan tindakan.
         </p>
         <div className="flex flex-wrap gap-3">
-          <Link
-            href="/submit"
-            // cva concatenates; cn() is what resolves the conflicting colours.
-            className={cn(
-              buttonVariants({ size: "lg" }),
-              "bg-accent text-accent-foreground hover:bg-accent/85"
-            )}
-          >
-            <FileTextIcon data-icon="inline-start" />
+          <Link href="/submit" className={buttonVariants({ size: "lg" })}>
             Hantar aduan
           </Link>
           <Link
             href="/track"
-            className={cn(
-              buttonVariants({ size: "lg", variant: "outline" }),
-              "border-primary-foreground/30 bg-transparent text-primary-foreground hover:bg-primary-foreground/10 hover:text-primary-foreground"
-            )}
+            className={buttonVariants({ size: "lg", variant: "glass" })}
           >
-            <SearchIcon data-icon="inline-start" />
             Semak status
           </Link>
         </div>
@@ -93,10 +94,15 @@ export default function PortalHomePage() {
           {POINTS.map(({ icon: Icon, title, body }) => (
             <div
               key={title}
-              className="flex flex-col gap-2 rounded-xl border border-border bg-card p-5"
+              className="flex surface-card-interactive flex-col gap-3 surface-card border-border/70 bg-card p-6"
             >
-              <Icon className="size-5 text-secondary" aria-hidden />
-              <h2 className="font-medium">{title}</h2>
+              <span
+                aria-hidden
+                className="flex size-11 items-center justify-center rounded-xl bg-linear-to-br from-secondary/15 to-primary/10 text-secondary ring-1 ring-secondary/15"
+              >
+                <Icon className="size-5" />
+              </span>
+              <h3 className="font-semibold text-foreground">{title}</h3>
               <p className="text-sm text-muted-foreground">{body}</p>
             </div>
           ))}
@@ -116,42 +122,82 @@ export default function PortalHomePage() {
           {STEPS.map((stepItem, index) => (
             <li
               key={stepItem.title}
-              className="flex flex-col gap-2 rounded-xl border border-border bg-card p-5"
+              className="relative flex flex-col gap-3 overflow-hidden surface-card border-border/70 bg-card p-6"
             >
               <span
-                className="flex size-7 items-center justify-center rounded-full bg-accent text-sm font-semibold text-accent-foreground"
+                aria-hidden
+                className="absolute inset-x-0 top-0 h-1 bg-linear-to-r from-accent to-accent/30"
+              />
+              <span
+                className="flex size-9 items-center justify-center rounded-full bg-accent/15 text-sm font-semibold text-accent ring-1 ring-accent/30"
                 aria-hidden
               >
                 {index + 1}
               </span>
-              <h3 className="font-medium">{stepItem.title}</h3>
+              <h3 className="font-semibold text-foreground">
+                {stepItem.title}
+              </h3>
               <p className="text-sm text-muted-foreground">{stepItem.body}</p>
             </li>
           ))}
         </ol>
       </section>
 
-      <section className="flex flex-col items-start gap-4 rounded-xl border border-border bg-card p-6 md:flex-row md:items-center md:justify-between">
-        <div className="flex flex-col gap-1">
-          <h2 className="font-semibold text-primary">Sudah membuat aduan?</h2>
-          <p className="text-sm text-muted-foreground">
-            Semak status dengan no. rujukan, atau lihat{" "}
-            <Link
-              href="/faq"
-              className="text-primary underline-offset-4 hover:underline"
+      <section
+        aria-labelledby="track-cta-heading"
+        className="relative isolate overflow-hidden surface-card border-border/70 bg-card p-6 md:p-8"
+      >
+        <div
+          aria-hidden
+          className="absolute -top-24 -right-16 -z-10 size-72 rounded-full bg-accent/15 blur-3xl"
+        />
+        <div
+          aria-hidden
+          className="absolute -bottom-28 left-1/4 -z-10 size-64 rounded-full bg-secondary/10 blur-3xl"
+        />
+        <div className="grid items-center gap-6 md:grid-cols-[auto_1fr_auto]">
+          <span
+            aria-hidden
+            className="flex size-14 items-center justify-center rounded-2xl bg-linear-to-br from-primary to-secondary text-primary-foreground shadow-md"
+          >
+            <SearchIcon className="size-6" />
+          </span>
+          <div className="flex flex-col gap-2">
+            <h2
+              id="track-cta-heading"
+              className="text-xl font-semibold tracking-tight text-primary"
             >
-              soalan lazim
-            </Link>
-            .
-          </p>
+              Sudah membuat aduan?
+            </h2>
+            <p className="max-w-xl text-sm text-muted-foreground">
+              Masukkan no. rujukan daripada e-mel pengesahan untuk melihat
+              perkembangan terkini aduan anda. Contoh:{" "}
+              <span className="rounded-md bg-muted px-1.5 py-0.5 font-mono text-xs text-foreground">
+                UI/2026/00012
+              </span>
+            </p>
+            <p className="flex flex-wrap gap-x-4 gap-y-1 text-sm">
+              <Link
+                href="/hubungi#soalan-lazim"
+                className="font-medium text-primary underline-offset-4 hover:underline"
+              >
+                Soalan lazim
+              </Link>
+              <Link
+                href="/hubungi"
+                className="font-medium text-primary underline-offset-4 hover:underline"
+              >
+                Hubungi kami
+              </Link>
+            </p>
+          </div>
+          <Link
+            href="/track"
+            className={buttonVariants({ size: "lg", variant: "outline-cta" })}
+          >
+            Semak status
+          </Link>
         </div>
-        <Link
-          href="/track"
-          className={buttonVariants({ variant: "secondary", size: "lg" })}
-        >
-          <SearchIcon data-icon="inline-start" />
-          Semak status aduan
-        </Link>
       </section>
     </div>
   )

@@ -1,7 +1,7 @@
 "use client"
 
 import * as React from "react"
-import { PencilIcon, PlusIcon, SendIcon } from "lucide-react"
+import { SendIcon } from "lucide-react"
 
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -63,7 +63,6 @@ export function CaseActions({
     <div className="flex flex-col gap-4">
       <div className="flex justify-end">
         <Button variant="outline" onClick={() => setEditing("new")}>
-          <PlusIcon data-icon="inline-start" />
           Tambah tindakan
         </Button>
       </div>
@@ -130,7 +129,7 @@ function ActionCard({
   onChanged: () => Promise<void>
 }) {
   return (
-    <article className="flex flex-col gap-4 rounded-lg border border-border p-4">
+    <article className="flex flex-col gap-4 rounded-xl border border-border/70 bg-muted/30 p-4">
       <header className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
         <div className="flex flex-col gap-1">
           <p className="text-xs text-muted-foreground">
@@ -144,7 +143,6 @@ function ActionCard({
           </h3>
         </div>
         <Button variant="ghost" size="sm" onClick={onEdit}>
-          <PencilIcon data-icon="inline-start" />
           Kemas kini
         </Button>
       </header>
@@ -235,7 +233,7 @@ function Referral({
   }
 
   return (
-    <div className="flex flex-col gap-2 rounded-lg bg-muted/50 p-3">
+    <div className="flex flex-col gap-2 rounded-xl bg-muted/50 p-3">
       <div className="flex flex-wrap items-center gap-2 text-sm">
         <span className="font-medium">Rujukan KJ / sub-unit:</span>
         {assigned ? (

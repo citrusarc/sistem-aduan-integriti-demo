@@ -10,10 +10,12 @@ import {
 import { FieldControl, FormField } from "@/components/ui/field"
 import { Input, Textarea } from "@/components/ui/input"
 import { cn } from "@/lib/utils"
+import { NATIONALITY } from "@/types/enums"
 import type {
   ComplainantCategory,
   Gender,
   GradeLevelGroup,
+  Nationality,
 } from "@/types/enums"
 
 /**
@@ -35,7 +37,8 @@ export type ComplainantDetails = {
   passportNo: string
   gender: Gender | null
   race: string
-  nationality: string
+  /** Decides the identity document: IC for WARGANEGARA, passport otherwise. */
+  nationality: Nationality | null
   contactPhone: string
   contactPhone2: string
   contactEmail: string
@@ -53,7 +56,7 @@ export const EMPTY_COMPLAINANT: ComplainantDetails = {
   passportNo: "",
   gender: null,
   race: "",
-  nationality: "",
+  nationality: null,
   contactPhone: "",
   contactPhone2: "",
   contactEmail: "",
@@ -77,6 +80,8 @@ export function complainantFormatErrors(
   anonymous: boolean
 ): ComplainantErrors {
   const e: ComplainantErrors = {}
+  // Anonymous sends no details, so none can be malformed.
+  if (anonymous) return e
   const email = value.contactEmail.trim()
   if (email && !EMAIL.test(email)) e.contactEmail = "Alamat e-mel tidak sah"
   if (value.contactPhone.trim() && !PHONE.test(value.contactPhone.trim())) {
@@ -85,7 +90,6 @@ export function complainantFormatErrors(
   if (value.contactPhone2.trim() && !PHONE.test(value.contactPhone2.trim())) {
     e.contactPhone2 = "Nombor telefon tidak sah"
   }
-  if (anonymous) return e
   if (value.icNo.trim() && !IC_NO.test(value.icNo.trim())) {
     e.icNo = "No. kad pengenalan mesti 12 digit"
   }
@@ -102,28 +106,45 @@ export function complainantFormatErrors(
 const text = (v: string) => (v.trim() ? v.trim() : null)
 
 /**
- * Request block for BE. Anonymous sends only what doesn't identify the person —
- * BE refuses the rest (422), so nothing typed before switching can leak.
+ * §8 decision 12, for the portal: a named complainant states nationality and
+ * gives the matching document — IC for a citizen, passport otherwise. Same
+ * rule as BE's publicCreateComplaintSchema. Staff registration doesn't use it.
+ */
+export function identityDocumentErrors(
+  value: ComplainantDetails
+): ComplainantErrors {
+  if (!value.nationality) return { nationality: "Pilih warganegara anda" }
+  if (value.nationality === "WARGANEGARA" && !value.icNo.trim()) {
+    return { icNo: "No. kad pengenalan wajib bagi warganegara" }
+  }
+  if (value.nationality === "BUKAN_WARGANEGARA" && !value.passportNo.trim()) {
+    return { passportNo: "No. pasport wajib bagi bukan warganegara" }
+  }
+  return {}
+}
+
+/**
+ * Request block for BE. Anonymous sends nothing about the person (§8 decision
+ * 11) — BE refuses any detail (422), so nothing typed before switching leaks.
  */
 export function complainantBody(value: ComplainantDetails, anonymous: boolean) {
-  const common = {
+  if (anonymous) return { isAnonymous: true }
+  return {
+    isAnonymous: false,
     complainantCategory: value.complainantCategory,
     contactEmail: text(value.contactEmail),
     contactPhone: text(value.contactPhone),
     contactPhone2: text(value.contactPhone2),
-  }
-  if (anonymous) return { isAnonymous: true, ...common }
-  return {
-    isAnonymous: false,
-    ...common,
     particulars: text(value.particulars),
     gradeLevel: value.gradeLevel,
-    icNo: text(value.icNo),
+    // A non-citizen isn't asked for an IC number; the field is hidden, so
+    // anything typed before switching isn't sent.
+    icNo: value.nationality === "BUKAN_WARGANEGARA" ? null : text(value.icNo),
     passportNo: text(value.passportNo),
     age: value.age.trim() ? Number(value.age.trim()) : null,
     gender: value.gender,
     race: text(value.race),
-    nationality: text(value.nationality),
+    nationality: value.nationality,
     postalAddress: text(value.postalAddress),
     occupation: text(value.occupation),
     employer: text(value.employer),
@@ -134,9 +155,9 @@ export function ComplainantDetailsFields({
   value,
   onChange,
   errors = {},
-  anonymous,
   audience,
   nameRequired,
+  identityRequired,
   emailRequired,
   emailDescription,
 }: {
@@ -146,11 +167,11 @@ export function ComplainantDetailsFields({
     next: ComplainantDetails[K]
   ) => void
   errors?: ComplainantErrors
-  /** Hides every field that identifies the person. */
-  anonymous: boolean
   /** Wording: the complainant filling it in, or an officer on their behalf. */
   audience: "portal" | "staff"
   nameRequired?: boolean
+  /** Portal: nationality and its matching document are required (decision 12). */
+  identityRequired?: boolean
   emailRequired?: boolean
   emailDescription?: React.ReactNode
 }) {
@@ -175,55 +196,69 @@ export function ComplainantDetailsFields({
         />
       </FormField>
 
-      {!anonymous && (
-        <>
-          <FormField
-            label="Nama"
-            required={nameRequired}
-            error={errors.particulars}
-          >
-            <Input
-              autoComplete={portal ? "name" : "off"}
-              {...input("particulars")}
-            />
-          </FormField>
-          <FormField label="No. kad pengenalan" error={errors.icNo}>
-            <Input
-              inputMode="numeric"
-              placeholder="YYMMDD-PB-###G"
-              autoComplete="off"
-              {...input("icNo")}
-            />
-          </FormField>
-          <FormField label="Umur" error={errors.age}>
-            <Input inputMode="numeric" maxLength={3} {...input("age")} />
-          </FormField>
-          <FormField
-            label="No. pasport"
-            error={errors.passportNo}
-            description="Bagi bukan warganegara, atau jika tiada kad pengenalan."
-          >
-            <Input autoComplete="off" {...input("passportNo")} />
-          </FormField>
-          <FormField label="Jantina">
-            <GenderSelect
-              value={value.gender}
-              onValueChange={(v) => onChange("gender", v)}
-              nullLabel="Tidak dinyatakan"
-              placeholder="Tidak dinyatakan"
-            />
-          </FormField>
-          <FormField label="Bangsa">
-            <Input {...input("race")} />
-          </FormField>
-          <FormField label="Warganegara">
-            <Input
-              autoComplete={portal ? "country-name" : "off"}
-              {...input("nationality")}
-            />
-          </FormField>
-        </>
+      <FormField
+        label="Nama"
+        required={nameRequired}
+        error={errors.particulars}
+      >
+        <Input
+          autoComplete={portal ? "name" : "off"}
+          {...input("particulars")}
+        />
+      </FormField>
+      <NationalityField
+        value={value.nationality}
+        onChange={(next) => onChange("nationality", next)}
+        required={identityRequired}
+        clearable={!portal}
+        error={errors.nationality}
+      />
+      {value.nationality !== "BUKAN_WARGANEGARA" && (
+        <FormField
+          label="No. kad pengenalan"
+          required={identityRequired && value.nationality === "WARGANEGARA"}
+          error={errors.icNo}
+        >
+          <Input
+            inputMode="numeric"
+            placeholder="YYMMDD-PB-###G"
+            autoComplete="off"
+            {...input("icNo")}
+          />
+        </FormField>
       )}
+      <FormField
+        label={
+          value.nationality === "WARGANEGARA" ? (
+            <>
+              No. pasport{" "}
+              <span className="font-normal text-muted-foreground">
+                (pilihan)
+              </span>
+            </>
+          ) : (
+            "No. pasport"
+          )
+        }
+        required={identityRequired && value.nationality === "BUKAN_WARGANEGARA"}
+        error={errors.passportNo}
+      >
+        <Input autoComplete="off" {...input("passportNo")} />
+      </FormField>
+      <FormField label="Umur" error={errors.age}>
+        <Input inputMode="numeric" maxLength={3} {...input("age")} />
+      </FormField>
+      <FormField label="Jantina">
+        <GenderSelect
+          value={value.gender}
+          onValueChange={(v) => onChange("gender", v)}
+          nullLabel="Tidak dinyatakan"
+          placeholder="Tidak dinyatakan"
+        />
+      </FormField>
+      <FormField label="Bangsa">
+        <Input {...input("race")} />
+      </FormField>
 
       <FormField
         label="No. telefon (1)"
@@ -244,7 +279,6 @@ export function ComplainantDetailsFields({
         required={emailRequired}
         error={errors.contactEmail}
         description={emailDescription}
-        className={anonymous ? "sm:col-span-2" : undefined}
       >
         <Input
           type="email"
@@ -253,45 +287,110 @@ export function ComplainantDetailsFields({
         />
       </FormField>
 
-      {!anonymous && (
-        <>
-          <FormField label="Alamat surat-menyurat" className="sm:col-span-2">
-            <FieldControl
-              render={
-                <Textarea
-                  rows={3}
-                  autoComplete={portal ? "street-address" : "off"}
-                  value={value.postalAddress}
-                  onChange={(e) => onChange("postalAddress", e.target.value)}
-                />
-              }
+      <FormField label="Alamat surat-menyurat" className="sm:col-span-2">
+        <FieldControl
+          render={
+            <Textarea
+              rows={3}
+              autoComplete={portal ? "street-address" : "off"}
+              value={value.postalAddress}
+              onChange={(e) => onChange("postalAddress", e.target.value)}
             />
-          </FormField>
-          <FormField label="Pekerjaan">
-            <Input {...input("occupation")} />
-          </FormField>
-          <FormField label="Agensi / syarikat majikan">
-            <Input {...input("employer")} />
-          </FormField>
-          {value.complainantCategory !== "ORANG_AWAM" && (
-            <FormField
-              label={
-                portal
-                  ? "Kumpulan gred (jika penjawat awam)"
-                  : "Kumpulan gred pengadu"
-              }
-            >
-              <GradeLevelSelect
-                value={value.gradeLevel}
-                onValueChange={(v) => onChange("gradeLevel", v)}
-                nullLabel="Tidak berkaitan"
-                placeholder="Tidak berkaitan"
-              />
-            </FormField>
-          )}
-        </>
+          }
+        />
+      </FormField>
+      <FormField label="Pekerjaan">
+        <Input {...input("occupation")} />
+      </FormField>
+      <FormField label="Agensi / syarikat majikan">
+        <Input {...input("employer")} />
+      </FormField>
+      {value.complainantCategory !== "ORANG_AWAM" && (
+        <FormField
+          label={
+            portal
+              ? "Kumpulan gred (jika penjawat awam)"
+              : "Kumpulan gred pengadu"
+          }
+        >
+          <GradeLevelSelect
+            value={value.gradeLevel}
+            onValueChange={(v) => onChange("gradeLevel", v)}
+            nullLabel="Tidak berkaitan"
+            placeholder="Tidak berkaitan"
+          />
+        </FormField>
       )}
     </div>
+  )
+}
+
+/** WARGANEGARA: exactly two options. */
+function NationalityField({
+  value,
+  onChange,
+  required,
+  clearable,
+  error,
+}: {
+  value: Nationality | null
+  onChange: (next: Nationality | null) => void
+  required?: boolean
+  clearable?: boolean
+  error?: string
+}) {
+  const name = React.useId()
+  const errorId = React.useId()
+  return (
+    <fieldset
+      className="flex flex-col gap-1.5 sm:col-span-2"
+      aria-describedby={error ? errorId : undefined}
+    >
+      <legend className="mb-1.5 text-sm font-medium">
+        Warganegara
+        {required && (
+          <span className="ml-0.5 text-destructive" aria-hidden="true">
+            *
+          </span>
+        )}
+      </legend>
+      <div className="flex flex-wrap items-center gap-2">
+        {(Object.keys(NATIONALITY) as Nationality[]).map((option, index) => (
+          <label
+            key={option}
+            className={cn(
+              "flex cursor-pointer items-center gap-2 rounded-lg border border-border px-3 py-2 text-sm has-checked:border-primary has-checked:bg-status-menunggu-jmm has-focus-visible:ring-3 has-focus-visible:ring-ring/30",
+              error && "border-destructive"
+            )}
+          >
+            <input
+              type="radio"
+              name={name}
+              checked={value === option}
+              onChange={() => onChange(option)}
+              required={required}
+              aria-invalid={index === 0 && error ? true : undefined}
+              className="accent-primary"
+            />
+            {NATIONALITY[option]}
+          </label>
+        ))}
+        {clearable && value !== null && (
+          <button
+            type="button"
+            onClick={() => onChange(null)}
+            className="px-2 text-xs text-muted-foreground underline-offset-4 hover:underline"
+          >
+            Kosongkan
+          </button>
+        )}
+      </div>
+      {error && (
+        <p id={errorId} className="text-xs text-destructive">
+          {error}
+        </p>
+      )}
+    </fieldset>
   )
 }
 

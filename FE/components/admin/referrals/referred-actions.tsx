@@ -1,7 +1,6 @@
 "use client"
 
 import * as React from "react"
-import { PencilIcon } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import { DateDisplay } from "@/components/ui/date-display"
@@ -114,7 +113,6 @@ export function ReferredActions({
                       setEditing(a)
                     }}
                   >
-                    <PencilIcon data-icon="inline-start" />
                     Kemas kini
                   </Button>
                 </TableCell>

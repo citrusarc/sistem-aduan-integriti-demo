@@ -2,12 +2,7 @@
 
 import * as React from "react"
 import Link from "next/link"
-import {
-  CheckCircle2Icon,
-  CircleDashedIcon,
-  LockIcon,
-  PenLineIcon,
-} from "lucide-react"
+import { CheckCircle2Icon, CircleDashedIcon, LockIcon } from "lucide-react"
 
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -54,7 +49,7 @@ export function DecisionCard({
   )
 
   return (
-    <article className="flex flex-col gap-4 rounded-lg border border-border p-4">
+    <article className="flex flex-col gap-4 rounded-xl border border-border/70 bg-muted/30 p-4">
       <header className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
         <div className="flex flex-col gap-1">
           <p className="text-xs text-muted-foreground">
@@ -156,7 +151,7 @@ function SignatureBlock({
   ]
 
   return (
-    <div className="flex flex-col gap-3 rounded-lg bg-muted/50 p-3">
+    <div className="flex flex-col gap-3 rounded-xl bg-muted/50 p-3">
       <div className="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
         <h4 className="text-sm font-semibold">Blok tandatangan</h4>
         <ul aria-label="Keadaan kuorum" className="flex flex-col gap-1 text-xs">
@@ -217,7 +212,6 @@ function SignatureBlock({
                   setSigning(s)
                 }}
               >
-                <PenLineIcon data-icon="inline-start" />
                 Rekod tandatangan
               </Button>
             )}

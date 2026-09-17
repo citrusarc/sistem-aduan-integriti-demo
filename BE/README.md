@@ -13,11 +13,10 @@ cp .env.example .env          # DATABASE_URL is required; the server won't boot 
 createdb aduan
 npm run db:migrate            # applies schema.sql, then every migration in order
 
-npm run db:seed               # optional: demo data + one login per role (see below)
-# …or create a real account instead:
-npm run staff -- create you@example.gov.my ADMIN "Your Name"  # prompts for a password
 npm run dev
 ```
+
+There is no demo data. On an empty database, open `/login` in the web app: it offers **Persediaan awal** to create the first ADMIN, who then creates every other staff account under Tetapan › Pengurusan staf. (Or from a terminal: `npm run staff -- create you@example.gov.my ADMIN "Your Name"`, which prompts for a password.) Complainants register themselves at `/me` › Daftar. Every email — login and registration codes, acknowledgements — is printed in this terminal instead of being sent.
 
 After pulling new migrations, run `npm run db:migrate` again. It applies only the files not yet recorded, so it's safe to run any time. To start over locally, `npm run db:reset` drops, recreates, and migrates in one step.
 
@@ -29,34 +28,6 @@ After pulling new migrations, run `npm run db:migrate` again. It applies only th
 - **Never edit an applied migration.** `db:migrate` refuses to run if a recorded file's contents have changed. Add a new numbered file instead. Locally, `db:reset` rebuilds from scratch.
 - A file without its own `BEGIN`/`COMMIT` is applied and recorded in a single transaction. A file with its own transaction is recorded immediately after it commits.
 - `db:reset` drops and recreates the database, then migrates. It refuses when `NODE_ENV=production`, when the host isn't local, or when the database is `postgres`/`template*`.
-
-### Demo data
-
-```bash
-npm run db:reset && npm run db:seed
-```
-
-Local only: refuses when `NODE_ENV=production`, on a non-local host, and on a database that already has staff or complaints (run `db:reset` first). Re-runnable after every reset. The logins are printed at the end:
-
-| Role | Email | Password |
-| --- | --- | --- |
-| KUI | `kui@demo.aduan.gov.my` | `Demo-KUI-2026!` |
-| PI | `pi@demo.aduan.gov.my` | `Demo-PI-2026!` |
-| PSU | `psu@demo.aduan.gov.my` | `Demo-PSU-2026!` |
-| KPSU | `kpsu@demo.aduan.gov.my` | `Demo-KPSU-2026!` |
-| SETIAUSAHA | `setiausaha@demo.aduan.gov.my` | `Demo-SETIAUSAHA-2026!` |
-| ADMIN | `admin@demo.aduan.gov.my` | `Demo-ADMIN-2026!` |
-| KJ | `kj@demo.aduan.gov.my` | `Demo-KJ-2026!` |
-| SUB_UNIT | `subunit@demo.aduan.gov.my` | `Demo-SUB_UNIT-2026!` |
-
-What you get, all fictional and all created through the real query functions (so every status came from a real transition):
-
-- **30 complaints**, Jan–Sep 2026: 6 Baru, 5 Menunggu JMM, 8 Dalam Tindakan, 5 Selesai, 6 NFA.
-- **Meetings:** `JMM Bil. 1/2026` (Selesai, 12 decided items) and `JMM Bil. 2/2026` (Dijadualkan, 5 items waiting).
-- **Decisions:** fully signed, chair-only, and unsigned — NFA ones included.
-- **Case actions** referred to KJ (5) and SUB_UNIT (2). One KJ referral is on a case later decided NFA, so the KJ inbox shows 4.
-- **Complainants:** identified `pengadu.demo@contoh.my` (5 complaints, one NFA and so hidden from them) and anonymous `tanpa.nama.demo@contoh.my` (2). Sign in at `http://localhost:3000/me` with the email; the OTP code prints in the `npm run dev` console under `Kod log masuk anda:`. `pengadu.demo` has one request pending (UI/2026/00001), so the protection form offers only their other complaints.
-- **Protection requests:** one each Diterima, Diluluskan, Ditolak.
 
 **Already set up by hand** (the old `psql -f` steps)? `db:migrate` will refuse, because it can't tell which files were applied. Either run `npm run db:reset` (deletes local data) or adopt the database without losing data:
 
@@ -78,7 +49,6 @@ npm run db:migrate -- --baseline 003   # marks schema.sql + 001–003 as applied
 | `npm run staff -- <cmd>` | Staff accounts: `create <email> <role> "<name>"`, `set-role <email> <role>`, `set-password`, `deactivate`, `activate`, `list` |
 | `npm run db:migrate` | Apply pending migrations (see [Migrations](#migrations)) |
 | `npm run db:reset` | Drop, recreate, and migrate the local database. Refuses in production |
-| `npm run db:seed` | Load demo data into an empty local database — see [Demo data](#demo-data) |
 
 ## Endpoints
 
@@ -98,7 +68,7 @@ npm run db:migrate -- --baseline 003   # marks schema.sql + 001–003 as applied
 | Method | Path | Does |
 | --- | --- | --- |
 | `GET` | `/api/health` | Liveness + DB round trip |
-| `POST` | `/api/complaints` | File a complaint. Accepts only `caseDescription`, `accusedParticulars`, `accusedDepartment`, `integrityCategory`, `complaintDate` plus the complainant block; filed as channel `SAI`, received today (Malaysia time). Requires `complainant` (named: `particulars`; anonymous: `isAnonymous: true` + `contactEmail`, no `particulars`) and `disclaimerAcknowledged: true`. Emails an acknowledgement when `contactEmail` is given. 409 with a *count* of possible duplicates unless `duplicateCheckAcknowledged: true` |
+| `POST` | `/api/complaints` | File a complaint. Accepts only `caseDescription`, `accusedParticulars`, `accusedDepartment`, `integrityCategory`, `complaintDate` plus the complainant block; filed as channel `SAI`, received today (Malaysia time). Requires `complainant` (named: `particulars`; anonymous: `isAnonymous: true` and no other complainant field) and `disclaimerAcknowledged: true`. Emails an acknowledgement when `contactEmail` is given. Also accepts multipart/form-data: the same JSON in `payload`, supporting documents in `files`. 409 with a *count* of possible duplicates unless `duplicateCheckAcknowledged: true` |
 | `GET` | `/api/complaints/:refNo` | Track by reference number. Returns a narrow, public-safe shape |
 
 ### Complainant — email OTP (cookie `aduan_csid`)
@@ -186,7 +156,8 @@ Without `TEST_DATABASE_URL`, tests use `DATABASE_URL` with `_test` appended to t
 - `src/test/complainant.test.ts` — portal submission, OTP expiry / attempt limit / reuse, my complaints and protection requests across complainants, NFA handling, and rule 10 (no SMS).
 - `src/test/referrals.test.ts` — referring actions; KJ/SUB_UNIT see only their own non-NFA actions and allowed fields, update only two fields, and stay 403 on `/api/admin/*`.
 - `src/test/staffManagement.test.ts` — ADMIN-only staff endpoints, immediate sign-out on deactivation and password reset, last-ADMIN guard.
-- `src/test/seed.test.ts` — `db:seed` produces the data described above, the printed logins work, and it re-runs after a reset.
+- `src/test/attachments.test.ts` — supporting documents: content typing, metadata stripping, nothing written on refusal, Integrity Unit-only download.
+- `src/test/accounts.test.ts` — first-run ADMIN setup, complainant registration, and the public status timeline.
 
 Test files run one at a time (`--test-concurrency=1`) because they share the test database. Outbound email is captured in memory rather than printed.
 

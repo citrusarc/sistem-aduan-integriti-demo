@@ -3,7 +3,6 @@
 import * as React from "react"
 import Link from "next/link"
 import { useSearchParams } from "next/navigation"
-import { PlusIcon, XIcon } from "lucide-react"
 
 import { Button, buttonVariants } from "@/components/ui/button"
 import { DateDisplay } from "@/components/ui/date-display"
@@ -111,7 +110,6 @@ export function ComplaintRegister() {
         description="Semua aduan yang diterima Unit Integriti, termasuk kes NFA."
         actions={
           <Link href="/complaints/new" className={buttonVariants()}>
-            <PlusIcon data-icon="inline-start" />
             Daftar aduan
           </Link>
         }
@@ -120,7 +118,7 @@ export function ComplaintRegister() {
       <div
         role="search"
         aria-label="Tapis aduan"
-        className="grid gap-3 rounded-xl border border-border bg-card p-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6"
+        className="grid gap-3 surface-card border-border/70 bg-card p-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6"
       >
         <FormField label="Status">
           <ComplaintStatusSelect
@@ -190,7 +188,6 @@ export function ComplaintRegister() {
                 )
               }
             >
-              <XIcon data-icon="inline-start" />
               Kosongkan penapis
             </Button>
           </div>

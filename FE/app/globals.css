@@ -25,6 +25,9 @@
   --color-border: var(--border);
   --color-destructive: var(--destructive);
   --color-accent-foreground: var(--accent-foreground);
+  --color-cta: var(--cta);
+  --color-cta-hover: var(--cta-hover);
+  --color-cta-foreground: var(--cta-foreground);
   --color-accent: var(--accent);
   --color-muted-foreground: var(--muted-foreground);
   --color-muted: var(--muted);
@@ -77,6 +80,11 @@
   --muted-foreground: oklch(0.456 0.007 264.5);
   --accent: oklch(0.655 0.109 74.3); /* #B8863C muted gold */
   --accent-foreground: oklch(0.985 0 0);
+  /* Primary buttons: the palette gold, deepened so white text passes AA
+     (#B8863C gives white only 3.2:1). */
+  --cta: oklch(0.555 0.097 75.2); /* #946A28, 4.8:1 with white */
+  --cta-hover: oklch(0.496 0.088 75); /* #7F5A20 */
+  --cta-foreground: oklch(0.985 0 0);
   --destructive: oklch(0.577 0.245 27.325);
   --border: oklch(0.876 0.008 91.5); /* #D8D6D0 */
   --input: oklch(0.876 0.008 91.5);
@@ -109,6 +117,14 @@
   --status-selesai-foreground: oklch(0.479 0.078 161.1);
   --status-nfa: oklch(0.923 0.004 236.5);
   --status-nfa-foreground: oklch(0.444 0.023 248.3);
+
+  /* Cards: a hairline plus a soft, navy-tinted lift instead of a hard border. */
+  --card-shadow:
+    0 1px 2px oklch(0.27 0.02 256 / 0.05),
+    0 8px 24px -12px oklch(0.27 0.04 256 / 0.16);
+  --card-shadow-hover:
+    0 2px 4px oklch(0.27 0.02 256 / 0.06),
+    0 20px 40px -16px oklch(0.346 0.074 256 / 0.3);
 }
 
 .dark {
@@ -126,6 +142,9 @@
   --muted-foreground: oklch(0.7 0.008 248);
   --accent: oklch(0.74 0.105 74.3);
   --accent-foreground: oklch(0.192 0.008 248);
+  --cta: oklch(0.74 0.105 74.3);
+  --cta-hover: oklch(0.79 0.1 76);
+  --cta-foreground: oklch(0.192 0.008 248);
   --destructive: oklch(0.704 0.191 22.216);
   --border: oklch(1 0 0 / 12%);
   --input: oklch(1 0 0 / 16%);
@@ -156,6 +175,38 @@
   --status-selesai-foreground: oklch(0.81 0.07 158);
   --status-nfa: oklch(0.315 0.008 236.5);
   --status-nfa-foreground: oklch(0.79 0.02 248.3);
+
+  /* Shadows barely read on a dark ground, so a faint top highlight does the lifting. */
+  --card-shadow:
+    inset 0 1px 0 oklch(1 0 0 / 0.05), 0 1px 2px oklch(0 0 0 / 0.3),
+    0 8px 24px -12px oklch(0 0 0 / 0.5);
+  --card-shadow-hover:
+    inset 0 1px 0 oklch(1 0 0 / 0.08), 0 20px 40px -16px oklch(0 0 0 / 0.7);
+}
+
+/* Card shape only: radius, hairline, shadow. Background and border colour stay
+   as ordinary classes (bg-card, border-border/70, border-accent/50 ...) so a
+   tinted card can override them without fighting utility order. */
+@utility surface-card {
+  border-radius: var(--radius-2xl);
+  border-width: 1px;
+  box-shadow: var(--card-shadow);
+}
+
+/* For cards that are links: lift on hover. */
+@utility surface-card-interactive {
+  transition-property: box-shadow, transform, border-color, background-color;
+  transition-duration: 200ms;
+  transition-timing-function: cubic-bezier(0.2, 0, 0, 1);
+  &:hover {
+    box-shadow: var(--card-shadow-hover);
+    transform: translateY(-2px);
+  }
+  @media (prefers-reduced-motion: reduce) {
+    &:hover {
+      transform: none;
+    }
+  }
 }
 
 @layer base {
@@ -164,6 +215,13 @@
   }
   body {
     @apply bg-background text-foreground;
+  }
+  /* Tailwind v4 dropped the pointer cursor on buttons; restore it everywhere,
+     including icon buttons and base-ui triggers rendered as role="button". */
+  button:not(:disabled),
+  [role="button"]:not([aria-disabled="true"]),
+  summary {
+    cursor: pointer;
   }
   html {
     @apply font-sans;

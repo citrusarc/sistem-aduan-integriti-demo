@@ -1,7 +1,5 @@
 "use client"
 
-import { ChevronLeftIcon, ChevronRightIcon } from "lucide-react"
-
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 
@@ -55,7 +53,6 @@ function Pagination({
         disabled={disabled || page <= 1}
         onClick={() => onPageChange(page - 1)}
       >
-        <ChevronLeftIcon data-icon="inline-start" />
         Sebelumnya
       </Button>
       <span className="text-sm text-muted-foreground" aria-live="polite">
@@ -68,7 +65,6 @@ function Pagination({
         onClick={() => onPageChange(page + 1)}
       >
         Seterusnya
-        <ChevronRightIcon data-icon="inline-end" />
       </Button>
     </nav>
   )

@@ -26,14 +26,21 @@ export type OtpPolicy = {
 };
 
 /**
- * Whether an address may receive a login code: it must be the contact email of
- * at least one complaint the complainant is allowed to see (rule 2). Anyone
- * else gets the same response and no email — the portal can't be used to mail
- * codes to arbitrary addresses, or to learn which addresses have complaints.
+ * Whether an address may receive a login code: it belongs to a verified
+ * complainant account (§8 decision 13), or is the contact email of at least
+ * one complaint the complainant is allowed to see (rule 2). Anyone else gets
+ * the same response and no email — sign-in can't be used to mail codes to
+ * arbitrary addresses, or to learn which addresses have complaints.
+ *
+ * Registration is the one deliberate exception: it mails a code to the address
+ * being registered, which is how that address proves it is the registrant's.
  */
-async function hasDisclosableComplaint(email: string): Promise<boolean> {
+async function mayReceiveLoginCode(email: string): Promise<boolean> {
   const row = await queryOne<{ found: boolean }>(
     `SELECT EXISTS (
+       SELECT 1 FROM complainant_accounts
+        WHERE email = $1 AND verified_at IS NOT NULL
+     ) OR EXISTS (
        SELECT 1 FROM complaints c
         WHERE c.complainant_id IN (
                 SELECT id FROM complainants WHERE lower(contact_email) = $1
@@ -45,9 +52,58 @@ async function hasDisclosableComplaint(email: string): Promise<boolean> {
   return row?.found ?? false;
 }
 
+/**
+ * Registration (§8 decision 13): records name + email, unverified until the
+ * code mailed to that address is entered. Re-registering an unverified
+ * address replaces the name; a verified account is never renamed this way, so
+ * someone typing another person's email can't change their account.
+ */
+export async function registerComplainantAccount(
+  email: string,
+  fullName: string,
+): Promise<void> {
+  await query(
+    `INSERT INTO complainant_accounts (email, full_name)
+     VALUES ($1, $2)
+     ON CONFLICT (email) DO UPDATE
+        SET full_name = EXCLUDED.full_name, updated_at = now()
+      WHERE complainant_accounts.verified_at IS NULL`,
+    [email, fullName],
+  );
+  // Sign-ups nobody confirmed within a day are dropped.
+  await query(
+    `DELETE FROM complainant_accounts
+      WHERE verified_at IS NULL AND created_at < now() - INTERVAL '1 day'`,
+  );
+}
+
+/** After a correct code: the address is proven, so its account is verified. */
+export async function markComplainantAccountVerified(
+  email: string,
+): Promise<void> {
+  await query(
+    `UPDATE complainant_accounts
+        SET verified_at = now(), updated_at = now()
+      WHERE email = $1 AND verified_at IS NULL`,
+    [email],
+  );
+}
+
+/** The registered name, or null for a complaint-only sign-in. */
+export async function getComplainantAccountName(
+  email: string,
+): Promise<string | null> {
+  const row = await queryOne<{ full_name: string }>(
+    `SELECT full_name FROM complainant_accounts
+      WHERE email = $1 AND verified_at IS NOT NULL`,
+    [email],
+  );
+  return row?.full_name ?? null;
+}
+
 export type IssueResult =
   | { issued: true; code: string }
-  | { issued: false; reason: "no-complaints" | "throttled" };
+  | { issued: false; reason: "not-eligible" | "throttled" };
 
 /**
  * Issues a new code for `email`, unless the address has no visible complaints
@@ -60,6 +116,7 @@ export async function issueOtp(
   email: string,
   policy: OtpPolicy,
   ip: string | undefined,
+  purpose: "login" | "register" = "login",
 ): Promise<IssueResult> {
   // Hash before looking the address up, so an unknown address costs the same
   // scrypt as a known one and response time doesn't tell them apart.
@@ -69,8 +126,8 @@ export async function issueOtp(
   );
   const codeHash = await hashPassword(code);
 
-  if (!(await hasDisclosableComplaint(email))) {
-    return { issued: false, reason: "no-complaints" };
+  if (purpose === "login" && !(await mayReceiveLoginCode(email))) {
+    return { issued: false, reason: "not-eligible" };
   }
 
   return withTransaction(async (client) => {

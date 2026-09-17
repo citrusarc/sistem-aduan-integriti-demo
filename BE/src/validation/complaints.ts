@@ -13,6 +13,7 @@ import {
   icNoSchema,
   infoClassificationSchema,
   integrityCategorySchema,
+  nationalitySchema,
   optionalText,
   passportNoSchema,
   phoneSchema,
@@ -27,9 +28,9 @@ const blankToNull = (value: unknown) =>
   typeof value === "string" && value.trim() === "" ? null : value;
 
 /**
- * §8 decision 3 — contact details and anonymity. The same rule the database
- * enforces (chk_anonymous_contact), checked here first so a client gets a 422
- * naming the field instead of a 500.
+ * §8 decisions 3 and 10 — contact details and anonymity. The same rules the
+ * database enforces (chk_anonymous_no_name, chk_anonymous_identity), checked
+ * here first so a client gets a 422 naming the field instead of a 500.
  */
 const complainantFields = z.object({
   /** NAMA on Lampiran 2. */
@@ -47,7 +48,7 @@ const complainantFields = z.object({
   age: z.number().int().min(0).max(130).nullish(),
   gender: genderSchema.nullish(),
   race: optionalText(100),
-  nationality: optionalText(100),
+  nationality: nationalitySchema.nullish(),
   /** Same as contactPhone: staff call it by hand, nothing sends to it. */
   contactPhone2: z.preprocess(blankToNull, phoneSchema.nullish()),
   postalAddress: optionalText(1000),
@@ -58,11 +59,18 @@ const complainantFields = z.object({
 type ComplainantInput = z.infer<typeof complainantFields>;
 
 /**
- * Lampiran 2 fields that identify the person. An anonymous complainant gives
- * none of them — refused rather than dropped, like `particulars`, and backed
- * by chk_anonymous_identity (migration 010).
+ * Every complainant field. An anonymous complainant gives none of them
+ * (§8 decision 11) — refused rather than dropped, so nothing typed can be
+ * stored by mistake. Backed by chk_anonymous_identity (010) and
+ * chk_anonymous_no_details (012).
  */
-const IDENTIFYING_FIELDS = [
+const COMPLAINANT_DETAIL_FIELDS = [
+  "particulars",
+  "gradeLevel",
+  "complainantCategory",
+  "contactEmail",
+  "contactPhone",
+  "contactPhone2",
   "icNo",
   "passportNo",
   "age",
@@ -76,29 +84,14 @@ const IDENTIFYING_FIELDS = [
 
 function checkAnonymous(value: ComplainantInput, ctx: z.RefinementCtx) {
   if (!value.isAnonymous) return;
-  for (const field of IDENTIFYING_FIELDS) {
+  for (const field of COMPLAINANT_DETAIL_FIELDS) {
     if (value[field] !== null && value[field] !== undefined) {
       ctx.addIssue({
         code: "custom",
         path: [field],
-        message: "Aduan tanpa nama tidak menyimpan butiran peribadi pengadu",
+        message: "Aduan tanpa nama tidak menyimpan sebarang butiran pengadu",
       });
     }
-  }
-  if (!value.contactEmail) {
-    ctx.addIssue({
-      code: "custom",
-      path: ["contactEmail"],
-      message:
-        "Aduan tanpa nama memerlukan alamat e-mel supaya kami boleh menghubungi anda",
-    });
-  }
-  if (value.particulars) {
-    ctx.addIssue({
-      code: "custom",
-      path: ["particulars"],
-      message: "Aduan tanpa nama tidak menyimpan nama atau butiran pengadu",
-    });
   }
 }
 
@@ -157,8 +150,12 @@ export const createComplaintSchema = z.object({
  *     are dropped
  *   - the complainant block is required, and the handling disclaimer must be
  *     acknowledged (§8 decision 3, rule 6)
- *   - a named submission must actually carry a name; leaving it blank without
- *     choosing "anonymous" would bypass rule 6's contact requirement
+ *   - a named submission must actually carry a name; a blank one is refused
+ *     rather than quietly treated as anonymous
+ *   - a named submission states nationality, and gives an IC number if
+ *     Malaysian or a passport number if not (§8 decision 12)
+ *   - supporting documents arrive as multipart files alongside this body
+ *     (§8 decisions 10–11); the route sets hasSupportingDocuments from them
  */
 export const publicCreateComplaintSchema = z.object({
   caseDescription: complaintFields.caseDescription,
@@ -171,15 +168,41 @@ export const publicCreateComplaintSchema = z.object({
   integrityCategory: complaintFields.integrityCategory,
   incidentDate: complaintFields.incidentDate,
   incidentTime: complaintFields.incidentTime,
-  hasSupportingDocuments: complaintFields.hasSupportingDocuments,
+  // No hasSupportingDocuments: the portal has no ADA/TIADA question; the
+  // route records it from whether files were attached (§8 decision 11).
   complainant: complainantFields.superRefine((value, ctx) => {
     checkAnonymous(value, ctx);
-    if (!value.isAnonymous && !value.particulars) {
+    if (value.isAnonymous) return;
+    if (!value.particulars) {
       ctx.addIssue({
         code: "custom",
         path: ["particulars"],
         message:
           "Nyatakan nama/butiran anda, atau pilih untuk membuat aduan tanpa nama",
+      });
+    }
+    // §8 decision 12: a named complainant proves identity by the document
+    // their nationality implies — MyKad for a citizen, passport otherwise.
+    // The other document stays optional, never refused.
+    if (!value.nationality) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["nationality"],
+        message: "Nyatakan warganegara anda",
+      });
+    } else if (value.nationality === "WARGANEGARA") {
+      if (!value.icNo) {
+        ctx.addIssue({
+          code: "custom",
+          path: ["icNo"],
+          message: "No. kad pengenalan wajib bagi warganegara Malaysia",
+        });
+      }
+    } else if (!value.passportNo) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["passportNo"],
+        message: "No. pasport wajib bagi bukan warganegara",
       });
     }
   }),

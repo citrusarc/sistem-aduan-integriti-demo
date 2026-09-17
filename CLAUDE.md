@@ -24,16 +24,19 @@ Do not assume an ORM (Prisma, Drizzle, etc.) will be introduced later without an
 
 Implemented in `BE/src/auth/*` and `BE/src/middleware/auth.ts`; schema in `BE/db/migrations/003_staff_auth.sql`.
 
-- **Passwords**: scrypt via `node:crypto` (N=2¹⁵, r=8), self-describing hash format so parameters can be raised later. Minimum 12 characters. `password_hash` is read only by `src/auth/store.ts` — `StaffUserRow` omits it on purpose.
+- **Passwords**: scrypt via `node:crypto` (N=2¹⁵, r=8), self-describing hash format so parameters can be raised later. Minimum 12 characters with upper case, lower case, a digit and a special character, for every password including temporary and first-ADMIN ones; a new password must differ from the current one (§8 decision 14). `password_hash` is read only by `src/auth/store.ts` — `StaffUserRow` omits it on purpose.
 - **Sessions**: rows in `staff_sessions`, keyed by the SHA-256 of a random token; only the cookie holds the raw token. 8 h absolute cap, 30 min idle timeout. Every request re-checks `staff_users.is_active`, so deactivation is immediate.
 - **Cookie**: `aduan_sid`, `HttpOnly`, `SameSite=Lax`, `Path=/api`, `Secure` in production. FE must call with `credentials: "include"` (done in `FE/lib/api.ts`).
 - **CSRF**: `SameSite=Lax` plus `requireTrustedOrigin`, which refuses any non-GET whose `Origin` isn't in `CORS_ORIGIN`.
-- **Brute force**: 5 failures → 15 min lockout. Failures during a lockout don't extend it (otherwise anyone knowing an email could lock that person out forever). Lockout is only revealed after a correct password.
+- **Sign-in steps** (§8 decision 14): email + password → slider image captcha (`src/auth/captcha.ts`, PNGs drawn with node:zlib, answer kept server-side, pass token single-use, spent before the password is checked) → 6-digit code emailed to the staff address (MFA; scrypt-hashed, 10 min, 5 tries) → session. If the password is older than `security_settings.password_max_age_days` (default 180, ADMIN sets it at Tetapan › Pengurusan staf) or was set by ADMIN (`must_change_password`), the code step returns a change token instead, and only a compliant new password opens the session.
+- **Brute force**: 5 wrong passwords **block** the account (`locked_until = infinity`) until ADMIN unlocks it (`POST /api/admin/staff/:id/unlock`) or the owner resets it through **Lupa kata laluan**. The block is only revealed after a correct password. Anyone who knows a staff email can trigger a block; the captcha and the self-service reset are the counterweights.
+- **Lupa kata laluan**: email + captcha → code emailed (unknown emails get an identical answer and a token no code can satisfy) → new password. A reset lifts the block and signs out every session.
 - **Enumeration**: one error message for every login failure, and unknown emails are verified against a dummy hash (warmed at startup) so timing matches a wrong password.
 - **Revocation**: logout deletes the session row; a password change or reset signs out every other session.
+- **First ADMIN** (§8 decision 13): there is no demo data. While `staff_users` is empty, `GET /api/auth/setup` reports `setupRequired` and `POST /api/auth/setup` creates the first ADMIN and signs them in; the check and insert share an advisory lock, and once any account exists it answers 409 forever. Refused in production (use the CLI there).
 - **Accounts** (§8 decision 7): ADMIN-only endpoints under `/api/admin/staff`, and `npm run staff -- create|set-role|set-password|deactivate|activate|list` in `BE/`. Both call the same functions in `src/auth/store.ts`. Neither will leave the system without an active ADMIN (409). The CLI reads passwords from a hidden prompt or stdin, never argv. Everyone changes their own password at `POST /api/auth/password`.
 
-Endpoints: `POST /api/auth/login`, `POST /api/auth/logout`, `GET /api/auth/me`, `POST /api/auth/password`.
+Endpoints: `GET /api/auth/captcha`, `POST /api/auth/captcha/verify`, `POST /api/auth/login`, `POST /api/auth/login/verify`, `POST /api/auth/password/expired`, `POST /api/auth/forgot-password`, `POST /api/auth/reset-password`, `POST /api/auth/logout`, `GET /api/auth/me`, `POST /api/auth/password`, `GET/POST /api/auth/setup`; ADMIN: `GET/PUT /api/admin/settings/security`.
 
 ### Roles and the Integrity Unit gate
 
@@ -49,7 +52,7 @@ Endpoints: `POST /api/auth/login`, `POST /api/auth/logout`, `GET /api/auth/me`, 
 
 | Table | Key fields | Purpose |
 |---|---|---|
-| `complainants` | `id`, `particulars` (text = NAMA), `grade_level` (enum), `contact_email`, `contact_phone`, `is_anonymous`; Lampiran 2 (migration 010): `complainant_category`, `ic_no`, `passport_no`, `age`, `gender`, `race`, `nationality`, `contact_phone_2`, `postal_address`, `occupation`, `employer` | Masterlist complainant record, a return channel (006), and the BORANG ADUAN/ MAKLUMAT identity fields (§8 decision 9) — **all optional, internal only**. Anonymous rows have `contact_email` and no `particulars` (`chk_anonymous_contact`) and none of IC/passport/age/gender/race/nationality/address/occupation/employer (`chk_anonymous_identity`) |
+| `complainants` | `id`, `particulars` (text = NAMA), `grade_level` (enum), `contact_email`, `contact_phone`, `is_anonymous`; Lampiran 2 (migration 010): `complainant_category`, `ic_no`, `passport_no`, `age`, `gender`, `race`, `nationality` (enum since 013: `WARGANEGARA`/`BUKAN_WARGANEGARA`), `contact_phone_2`, `postal_address`, `occupation`, `employer` | Masterlist complainant record, a return channel (006), and the BORANG ADUAN/ MAKLUMAT identity fields (§8 decision 9) — **all optional, internal only**. Anonymous rows carry **no details at all** (§8 decision 11): no name (`chk_anonymous_no_name`, 011), grade, category, email or phones (`chk_anonymous_no_details`, 012, NOT VALID — older anonymous rows may still hold an email), and none of IC/passport/age/gender/race/nationality/address/occupation/employer (`chk_anonymous_identity`, 010) |
 | `complaints` | `id`, `complaint_ref_no` (unique), `complainant_id` (FK), `source_channel`, `directed_to`, `accused_particulars`/`accused_grade_level`/`accused_department`, `info_classification`, `integrity_category`, `sector`, `case_description`, `complaint_date`, `received_date_ui`, `status` (enum), `status_changed_at`, `disclaimer_acknowledged_at`; Lampiran 2 (010): `accused_position`, `accused2_particulars`/`accused2_department`/`accused2_position`, `incident_date`, `incident_time`, `has_supporting_documents`, `received_via` (enum, 14 values) | Core case record, one row per complaint |
 | `jmm_decisions` | `id`, `complaint_id` (FK), `decision_date`, `agency_file_no`, `summary`, `jmm_source`, `jmm_classification`, `outcome` (enum, 6 values — see §3), `remarks_further_action`, `meeting_id` (FK, nullable) | The formal JMM decision form, one-to-many per complaint (a case can be re-tabled) |
 | `jmm_meetings` | `id`, `meeting_no` (unique), `meeting_date`, `venue`, `status` (`DIJADUALKAN`/`SELESAI`) | A JMM sitting (migration 004) |
@@ -60,6 +63,9 @@ Endpoints: `POST /api/auth/login`, `POST /api/auth/logout`, `GET /api/auth/me`, 
 | `staff_sessions` | `id` (SHA-256 of token), `staff_id` (FK), `expires_at`, `last_seen_at` | Server-side login sessions (migration 003) |
 | `complainant_otp_codes` | `id`, `email` (lower-case), `code_hash`, `expires_at`, `attempt_count` (≤ 5), `consumed_at` | Email OTP codes, hashed (migration 007) |
 | `complainant_sessions` | `id` (SHA-256 of token), `email`, `expires_at`, `last_seen_at` | Complainant sessions, cookie `aduan_csid` (migration 007) |
+| `complainant_accounts` | `id`, `email` (unique, lower-case), `full_name`, `verified_at` (NULL until the emailed code is entered), timestamps | Registered complainants (migration 014, §8 decision 13). Unverified sign-ups older than a day are deleted |
+| `complaint_status_history` | `id`, `complaint_id` (FK, RESTRICT), `from_status`, `to_status`, `changed_at` | One row per status a complaint entered (migration 014, §8 decision 13); the public timeline |
+| `complaint_attachments` | `id`, `complaint_id` (FK, RESTRICT), `storage_key` (random UUID, file name on disk), `original_name`, `mime_type` (PDF/JPEG/PNG/DOCX), `size_bytes`, `sha256`, `uploaded_by_staff_id` (FK, NULL = portal), `created_at` | Supporting documents (migration 011, §8 decision 10). Files live in `UPLOAD_DIR` on the BE machine; Integrity Unit only |
 | `protection_requests` | `id`, `complaint_id` (FK), `requested_by_email`, `reason`, `status` (`DITERIMA`/`DILULUSKAN`/`DITOLAK`), `reviewed_by` (FK staff), `reviewed_at`, `review_notes` (internal) | Whistleblower protection requests (migration 009) |
 | `schema_migrations` | `name`, `checksum`, `applied_at` | Created and owned by `npm run db:migrate`, not by a migration file |
 
@@ -79,6 +85,11 @@ Migrations layer on top and are never folded back into `schema.sql`, which stays
 | `008_case_action_assignment.sql` | `case_actions.assigned_to_staff_id` (§8 decision 5) |
 | `009_protection_requests.sql` | `protection_requests` (§8 decision 6) |
 | `010_borang_aduan_lampiran2.sql` | Lampiran 2 columns on `complainants` and `complaints`, `complainant_category_enum`, `gender_enum`, `received_via_enum`, `chk_anonymous_identity` (§8 decision 9) |
+| `011_anonymous_email_optional_attachments.sql` | Replaces `chk_anonymous_contact` with `chk_anonymous_no_name`; adds `complaint_attachments` (§8 decision 10) |
+| `013_nationality_two_options.sql` | `nationality_enum` (`WARGANEGARA`, `BUKAN_WARGANEGARA`); `complainants.nationality` converted from free text (§8 decision 12) |
+| `012_anonymous_no_details.sql` | `chk_anonymous_no_details` (NOT VALID): anonymous rows hold no grade, category, email or phones (§8 decision 11) |
+| `014_status_history_complainant_accounts.sql` | `complaint_status_history` (backfilled: BARU at registration + current status), `complainant_accounts` (§8 decision 13) |
+| `015_staff_password_security.sql` | `staff_users.must_change_password`, `security_settings` (single row, expiry days), `staff_captcha_challenges`, `staff_auth_challenges` (MFA / change / reset) (§8 decision 14) |
 
 ### Type mirrors — three copies, one truth
 
@@ -129,7 +140,7 @@ Everything else is refused with 409 and leaves the status unchanged. In particul
 - **Menunggu JMM always means "on an open meeting's agenda".** Adding it again is refused, and so is closing a meeting while any item has no decision (see §8).
 - **No PATCH moves status.** A `status` key on `PATCH /api/admin/complaints/:id` is refused with 400.
 
-`status_changed_at` moves only when the status actually changes, so a second non-NFA decision doesn't reset a case's age. Rows set by the migration 005 backfill before this API existed — especially `SELESAI` ones, which came from a text match — deserve one staff review.
+Every change is also appended to `complaint_status_history`, in the same transaction, by `applyStatusEvent()` (and the initial BARU by `createComplaint()`) — §8 decision 13. `status_changed_at` moves only when the status actually changes, so a second non-NFA decision doesn't reset a case's age. Rows set by the migration 005 backfill before this API existed — especially `SELESAI` ones, which came from a text match — deserve one staff review.
 
 ---
 
@@ -162,9 +173,10 @@ FE/                                  # Next.js 16, UI only
         settings/staff/              # ADMIN only
     globals.css                      # palette + status tokens (§7)
   components/
-    complaints/                      # borang-aduan-fields: Lampiran 2 field groups shared by /submit and complaints/new
+    complaints/                      # borang-aduan-fields: Lampiran 2 field groups shared by /submit and complaints/new;
+                                     # document-picker: supporting-document picker (portal + case file)
     admin/                           # admin-shell (gate), login-form, no-access
-      complaints/                    # register, registration-form, case-file, decision-card, case-actions
+      complaints/                    # register, registration-form, case-file, decision-card, case-actions, case-documents
       jmm/                           # meeting-list, meeting-detail, decision-form, decision-log
       stats/                         # dashboard, reports, buckets
       referrals/                     # referred-actions (KJ inbox + sub-unit tasks)
@@ -174,7 +186,7 @@ FE/                                  # Next.js 16, UI only
                                      # my-complaint-detail, protection-request-form, public-status
     providers/                       # staff-session, complainant-session — separate on purpose
     ui/                              # button, input/textarea/checkbox, field, select, enum-select,
-                                     # table, pagination, date-display, states, page-header, status-pill,
+                                     # table, pagination, date-display, states, page-header, status-pill, status-timeline,
                                      # dialog (Dialog, ConfirmDialog), section (Section, DetailList, Notice),
                                      # badge, bar-chart (single-series bars/columns + table view), back-link
   hooks/
@@ -208,14 +220,15 @@ BE/                                  # Express 5 + pg, no UI
       roles.ts                       # INTEGRITY_UNIT_ROLES gate list
     notify/
       email.ts                       # notifyByEmail() — the ONLY outbound channel (rule 10)
+    attachments/
+      files.ts                       # the ONLY code touching upload bytes / UPLOAD_DIR: multer, content typing, EXIF strip
     middleware/
       auth.ts                        # requireStaff(), cookie helpers, Origin check
       complainantAuth.ts             # requireComplainant(), aduan_csid cookie
       error-handler.ts               # HttpError, 404, error handler
     scripts/
       staff.ts                       # npm run staff -- create|set-password|...
-      db.ts                          # npm run db:migrate | db:reset
-      seed.ts                        # npm run db:seed (demo data lives in src/db/seed.ts)
+      db.ts                          # npm run db:migrate | db:reset  (there is no seed / demo data)
     routes/
       index.ts                       # mounts auth + the two trees
       auth.ts                        # /api/auth/login|logout|me|password
@@ -265,10 +278,10 @@ Each rule names where it is enforced. Enforcement lives in the query/validation 
 3. **Six fixed JMM outcomes, no more.** → `jmmOutcomeSchema`, derived from the enum mirror.
 4. **Two outcome vocabularies are not interchangeable.** `jmm_decisions.outcome` and `case_actions.action_taken` come from different forms. They overlap on `NFA` only by coincidence — that is not a mapping. → no code path converts between them, by design.
 5. **Duplicate check before new registration.** → `findDuplicateCandidates()`, recall-biased, over the same period date as stats (so a complaint with no received date is still a candidate). Both create paths refuse with 409 unless `duplicateCheckAcknowledged` is explicitly true. Staff see the candidates; the public caller gets only a count.
-6. **Anonymous complainants still need a way back to them.** → `publicCreateComplaintSchema` (422): anonymous requires `contactEmail` and refuses `particulars`; a named portal submission requires `particulars`, so leaving the name blank can't bypass this; `disclaimerAcknowledged` must be literally `true`, and the insert records `complaints.disclaimer_acknowledged_at`. Backstop: check constraint `chk_anonymous_contact` (migration 006). Never stuff an email into `particulars`.
+6. **Anonymous means anonymous, knowingly.** An anonymous complaint stores **no complainant details at all** — no name, identity field, category, grade, email or phone (§8 decision 11; superseded decision 3's "anonymous requires an email" and decision 10's "email optional"). The form must say what that costs before sending (no SAT, no follow-up, no login, only the reference number shown once). → `publicCreateComplaintSchema` and `createComplaintSchema` (422): anonymous refuses every complainant field; a named portal submission requires `particulars`, so a blank name isn't silently anonymous; `disclaimerAcknowledged` must be literally `true`, and the insert records `complaints.disclaimer_acknowledged_at`. Backstops: `chk_anonymous_no_name` (011), `chk_anonymous_no_details` (012), `chk_anonymous_identity` (010), and `createComplaint` nulls every detail on an anonymous row. Never stuff an email into `particulars`.
 7. **`complaint_ref_no` is immutable once issued.** Server-issued as `UI/<year>/<5-digit seq>` inside the insert transaction, under a per-year advisory lock so concurrent registrations get consecutive numbers instead of a 500, absent from every update schema, and a client sending one on PATCH is refused rather than silently ignored.
 8. **Signed decisions are append-only.** Once fully signed, the row is locked; corrections are a new decision row. → `isDecisionLocked()`; `signDecisionSlot()` only ever moves a slot from NULL to a timestamp, and only a slot of the decision in the URL, so a signature cannot be withdrawn, overwritten, or recorded through another decision's lock check.
-9. **Internal notes never reach the public API.** `ui_remarks`, `psu_action_notes`, `protection_requests.review_notes` / `reviewed_by`, and everything from `jmm_decisions` stay internal. → `toPublicComplaint()` and `toComplainantProtectionRequest()` **allow-list** fields rather than deleting them, so a column added later cannot leak by default. `/api/complainant/*` returns only those shapes.
+9. **Internal notes never reach the public API.** `ui_remarks`, `psu_action_notes`, `protection_requests.review_notes` / `reviewed_by`, everything from `jmm_decisions`, and supporting documents (`complaint_attachments` and the files) stay internal. → `toPublicComplaint()` and `toComplainantProtectionRequest()` **allow-list** fields rather than deleting them, so a column added later cannot leak by default. `/api/complainant/*` returns only those shapes.
 10. **No SMS, strictly.** Email is the only automated outbound channel — OTP codes, status updates, any notification — and it goes through a single `notifyByEmail()` that prints to the BE console locally. No SMS OTP, SMS notification, SMS provider, or SMS fallback, now or as a "later" option. `complainants.contact_phone` is for staff to call manually; no code may send anything to it. → `BE/src/notify/email.ts`: refuses any recipient that isn't an email address, prints locally, and **refuses in production** until a real mail transport is added there (printing OTP codes into production logs would leak them). `src/test/complainant.test.ts` fails if SMS-provider code or dependencies appear, or if any module handles `contact_phone` and also calls `notifyByEmail`.
 
 ---
@@ -294,7 +307,7 @@ Render statuses through `FE/components/ui/status-pill.tsx`, never as a bare stri
 
 ## 8. Decisions
 
-Product decisions made after discovery. Each closes a gap flagged elsewhere in this file. Schema for all of them exists (migrations 004–010, see §2). **API:** all nine are implemented in BE (see "How the API implements them" below). **UI:** all nine have screens except the KUI review of protection requests (decision 6's `/protection-requests` is a placeholder; complainants can already file and follow requests). See "How the UI implements them" at the end of this section. Recorded as given:
+Product decisions made after discovery. Each closes a gap flagged elsewhere in this file. Schema for all of them exists (migrations 004–015, see §2). **API:** all fourteen are implemented in BE (see "How the API implements them" below). **UI:** all fourteen have screens except the KUI review of protection requests (decision 6's `/protection-requests` is a placeholder; complainants can already file and follow requests). See "How the UI implements them" at the end of this section. Recorded as given:
 
 1. Stored status: complaints.status enum (BARU, MENUNGGU_JMM, DALAM_TINDAKAN,
    SELESAI, NFA), backfilled from the current derivation. Transitions written
@@ -310,7 +323,8 @@ Product decisions made after discovery. Each closes a gap flagged elsewhere in t
    - nullable jmm_decisions.meeting_id
    - A complaint may be on only one open meeting at a time.
 3. Complainant contact: complainants gains contact_email, contact_phone
-   (nullable), is_anonymous. Anonymous requires contact_email and stores no
+   (nullable), is_anonymous. Anonymous requires contact_email [superseded by
+   decision 10: now optional] and stores no
    name or particulars. Submission requires acknowledging a disclaimer.
    contact_phone is for staff to call manually only.
 4. Complainant login: EMAIL OTP only — 6 digits, 10-minute expiry, max 5
@@ -344,9 +358,58 @@ Product decisions made after discovery. Each closes a gap flagged elsewhere in t
      alongside — not replacing or mapped to — `source_channel` and `jmm_source`
    - portal: the complaint date is the submission day (server-set); what the
      complainant gives is the incident date/time. Portal sets `received_via`
-     to SISTEM_ADUAN_INTEGRITI. No document upload — only ADA/TIADA
+     to SISTEM_ADUAN_INTEGRITI. ~~No document upload — only ADA/TIADA~~ (superseded
+     by decision 10)
    - the duplicate check matches both accused names/agencies against both
      accused slots of existing cases
+10. Anonymous email optional + supporting-document upload (2026-09-17),
+    checked against Lampiran 2, which makes every BUTIR-BUTIR PENGADU field
+    optional and accepts "Surat Layang":
+    - anonymous asks for no personal details; the email is optional, with a
+      warning of what having none costs. Supersedes decision 3's "anonymous
+      requires contact_email" and rewrites rule 6
+    - DOKUMEN SOKONGAN: choosing ADA shows an upload; TIADA hides it. Stored
+      on the BE's local disk (no cloud), PDF/JPG/PNG/DOCX, size-limited,
+      Integrity Unit only, never through public/complainant APIs
+    - image metadata (EXIF/GPS) stripped for anonymous complainants
+11. Refines decision 10 (2026-09-17):
+    - "Tanpa nama" is strictly no butiran pengadu: nothing is asked or stored,
+      not even an email or phone. Tracking is by reference number only.
+      Applies to the portal and staff registration alike
+    - the portal has no ADA/TIADA question: supporting documents are an
+      optional upload, and has_supporting_documents is set to true when files
+      are attached (NULL otherwise). Staff registration keeps ADA/TIADA,
+      since it transcribes the paper form
+12. Identity document by nationality (2026-09-17), Lampiran 2, portal
+    submission, named complainants only:
+    - WARGANEGARA has exactly two options: Warganegara / Bukan warganegara
+    - Warganegara: NO. KAD PENGENALAN required; passport optional
+    - Bukan warganegara: NO. PASSPORT required; no IC asked (the field is
+      hidden and not sent)
+    - staff registration shows the same two options and fields, all optional
+13. Real local accounts, no demo data (2026-09-17):
+    - no seed script and no demo/dummy records; the local database starts
+      empty. The first ADMIN is created through a first-run setup page that
+      closes once any staff account exists (CLI still works)
+    - complainants register with name + email, confirmed by an email OTP;
+      a verified account can log in with or without complaints. Codes and
+      every other email print in the BE terminal locally (rule 10 unchanged)
+    - "Semak Status" shows a status timeline: each status entered and when,
+      nothing about who or why (rule 9); NFA complaints stay undisclosed
+      (rule 2). Staff see the same history on the case file
+14. Staff password and sign-in security (2026-09-17), from the agency
+    password policy:
+    - (a) 12+ characters, and MFA by a code sent to the staff email
+      (printed in the BE terminal locally)
+    - (b) every password has upper case, lower case, special character, digit
+    - (c) passwords expire after 180 days; the period is ADMIN-configurable;
+      an expired password must be replaced before use. Passwords ADMIN sets
+      (new accounts, resets) must also be replaced at first login
+    - (d) 5 failed attempts block the account
+    - (e)(f) passwords and PINs/codes are hidden when typed, with an eye
+      button to show them
+    - (g) slider image captcha after the password is entered
+    - (l) "Lupa kata laluan" on the login page
 
 ### How the schema implements them
 
@@ -381,8 +444,8 @@ Decisions 3, 4, 6 and 8 (BE):
 
 | Topic | Behaviour |
 |---|---|
-| Portal submission | Accepts only `caseDescription`, `accusedParticulars`, `accusedDepartment`, `integrityCategory`, `complaintDate` and the complainant block; the server files it as channel `SAI`, received today (Asia/Kuala_Lumpur) with that report month/year, and drops any other key — the unit's own fields are never chosen by the public. Complainant block required. Named needs `particulars`; anonymous needs `contactEmail` and refuses `particulars` (422, not silently dropped). Email stored trimmed and lower-cased; phone checked for shape only. An acknowledgement with the reference number goes to `contactEmail` when present; a failure to send is logged and doesn't fail the submission. Staff registration accepts the same contact fields, without the disclaimer. |
-| Who can get a login code | Only an address that is the contact email of at least one complaint it may see (rule 2). Every request answers 202 with the same message — known, unknown, NFA-only, or throttled — and costs the same scrypt. The email is sent without awaiting it, so transport latency doesn't reveal which. |
+| Portal submission | Accepts only `caseDescription`, `accusedParticulars`, `accusedDepartment`, `integrityCategory`, `complaintDate` and the complainant block; the server files it as channel `SAI`, received today (Asia/Kuala_Lumpur) with that report month/year, and drops any other key — the unit's own fields are never chosen by the public. Complainant block required. Named needs `particulars`; anonymous refuses every complainant field, including `contactEmail` (422, not silently dropped — decision 11). Named also needs `nationality`, then `icNo` if `WARGANEGARA` or `passportNo` if `BUKAN_WARGANEGARA`; the other document is accepted, never required (decision 12). Email stored trimmed and lower-cased; phone checked for shape only. An acknowledgement with the reference number goes to `contactEmail` when present; a failure to send is logged and doesn't fail the submission. Staff registration accepts the same contact fields, without the disclaimer. |
+| Who can get a login code | An address with a verified `complainant_accounts` row (decision 13), or the contact email of at least one complaint it may see (rule 2). Every request answers 202 with the same message — known, unknown, NFA-only, unverified, or throttled — and costs the same scrypt; locally the API terminal logs why no code was printed. The email is sent without awaiting it, so transport latency doesn't reveal which. |
 | Codes | 6 digits from `crypto.randomInt`, 10-minute expiry, scrypt-hashed. Only the newest code for an address is accepted, so a new code supersedes older ones. 5 wrong guesses exhaust it. Throttle: 60 s between codes, 5 per hour per address (`OTP_COOLDOWN_SECONDS`, `OTP_MAX_PER_HOUR`). Wrong, expired, used, and exhausted all return the same 401. |
 | Complainant session | `complainant_sessions`, SHA-256 of the token, cookie `aduan_csid` (same flags as staff). 2 h absolute, 30 min idle (`COMPLAINANT_SESSION_TTL_MINUTES`, `COMPLAINANT_SESSION_IDLE_MINUTES`). Rotated on sign-in. A complainant cookie opens no staff route and vice versa. |
 | My complaints | Complaints whose complainant row carries the session's email, disclosable only, in `toPublicComplaint` shape, addressed by reference number. Someone else's, NFA, and unknown all return the same 404. |
@@ -397,7 +460,27 @@ Decisions 5 and 7 (BE):
 | KJ / SUB_UNIT write | `PATCH /api/referrals/actions/:id`: strict body, those two fields only (422 for anything else, or neither). Not theirs, NFA, and missing all return the same 404. |
 | Staff management | `/api/admin/staff`, **ADMIN only**: list, create (password policy as CLI), set role, reset password, deactivate, activate. A role change applies on the next request (role is re-read per request). Reset and deactivate delete the account's sessions; deactivated accounts are also refused per request. Resetting your own password keeps your current session. |
 | Last ADMIN | Demoting or deactivating the last active ADMIN is refused (409), under row locks. |
-| Seed | `npm run db:seed`: local only, empty database only. Built through the query functions, so its data obeys every rule above. See `BE/README.md`. |
+
+Decision 14 (BE): see §1 "Staff auth" for the sign-in steps, blocking and reset. Test helper `ctx.staffLogin()` walks the whole flow (it reads the captcha answer and the emailed code); `src/test/passwordSecurity.test.ts` covers each point.
+
+Decision 13 (BE):
+
+| Topic | Behaviour |
+|---|---|
+| Registration | `POST /api/complainant/auth/register` `{ fullName, email }` → upserts an unverified `complainant_accounts` row (a verified one is never renamed) and emails a code, 202 with one message. `POST /api/complainant/auth/verify` then marks the account verified and signs in. `/auth/verify` and `/auth/me` return `fullName` (null for complaint-only sign-ins). |
+| Timeline | `GET /api/complaints/:refNo` and `GET /api/complainant/complaints/:refNo` add `timeline: [{ status, changedAt }]`, oldest first (`toStatusTimeline` allow-lists the two fields). Lists don't carry it. `GET /api/admin/complaints/:id` carries it too, including NFA. |
+| First-run setup | `GET/POST /api/auth/setup`, see §1. Password policy as everywhere else; the new ADMIN is signed in (cookie) on 201. |
+
+Decision 10 (BE):
+
+| Topic | Behaviour |
+|---|---|
+| Transport | `POST /api/complaints` and `POST /api/admin/complaints/:id/attachments` take multipart/form-data: the JSON body in `payload`, files in `files`. JSON-only submissions still work. multer in memory: 5 files per request, `UPLOAD_MAX_FILE_MB` (10) each (413 beyond); 20 per complaint (409). |
+| Typing | By content (PDF/JPEG/PNG magic bytes; DOCX = ZIP with `word/document.xml`, refused if it contains `vbaProject.bin`). Filename and client MIME are ignored. One bad file refuses the whole request (422). The portal body has no `hasSupportingDocuments`; the route sets it to true when files are attached, NULL otherwise (decision 11). |
+| Order | Validate → inspect files → duplicate check → write files (random UUID name, 0600) → insert complaint + attachment rows in one transaction → on failure delete the files. A refused or 409 request writes nothing. |
+| Metadata | JPEG APP1/APP3–13/APP15/COM and PNG tEXt/zTXt/iTXt/eXIf/tIME removed **only when the complainant is anonymous**; named complaints keep them as possible evidence. PDF/DOCX author metadata is not stripped — the portal warns anonymous users. |
+| Access | `GET /api/admin/complaints/:id` includes `attachments` (no storage key or hash). `GET …/attachments/:attachmentId/download` — Integrity Unit only, `Content-Disposition: attachment`, `nosniff`, `CSP: sandbox`, `no-store`; the attachment must belong to the complaint in the URL. Staff uploads set `has_supporting_documents` = true. |
+| Storage | `UPLOAD_DIR` (default `BE/uploads`, git-ignored). Evidence: back it up with the database. Tests use a temp dir. |
 
 ### How the UI implements them
 
@@ -408,8 +491,13 @@ Choices made in `FE` that the decisions don't spell out. None of them is the enf
 | Duplicate check (rule 5) | Staff: a 409 shows the candidate cases and the officer must tick a confirmation; editing any field clears it. Portal: BE returns only a count, and the complainant confirms the complaint is new. |
 | NFA on the portal (rule 2) | `/track` and `/me/complaints/[ref]` render one message for unknown, NFA, malformed and (for complainants) someone else's reference number. Portal copy (FAQ, status meanings) never explains a "not found" beyond a typo, and no status text mentions NFA. |
 | Complainant URLs | `/me/complaints/UI.2026.00012` — the reference number with `/` as `.` (`lib/ref-slug.ts`; `.` is outside BE's reference charset, so the mapping is exact). The URL is a handle, not access: BE answers only the session's own disclosable complaints. |
-| Complainant sign-in | `RequireComplainant` shows the OTP form in place on `/me`, a complaint page and `/submit/protection`, and again if the session expires. It repeats BE's single messages; "request a new code" waits 60 s to match the throttle. |
-| Portal email | `/submit` requires an email for named complaints too; BE requires it only for anonymous ones (rule 6). Phone is labelled for staff to call by hand (rule 10). |
+| Complainant sign-in | `RequireComplainant` shows the OTP card in place on `/me`, a complaint page and `/submit/protection`, and again if the session expires, with **Log masuk** and **Daftar** tabs (decision 13). It repeats BE's single messages; "request a new code" waits 60 s to match the throttle. Outside production it says the code is printed in the BE terminal. A signed-in registered complainant gets name and email prefilled on `/submit`. |
+| Status timeline | `StatusTimeline` (newest first, status pill + date-time) on `/track`, `/me/complaints/[ref]` and the staff case file. |
+| Staff sign-in | `login-form.tsx` steps: credentials (with "Lupa kata laluan?") → `SliderCaptcha` (drag or arrow keys + Enter; a miss resets the piece, a dead challenge loads a new picture) → code → new password if required. `/lupa-kata-laluan` (not gated) does email → captcha → code + new password. Every password and code field is `PasswordInput` (hidden, eye button), and new passwords show `PasswordRequirements`, a live checklist mirroring BE. Staff management shows Disekat / Perlu tukar kata laluan badges, a Buka sekatan action, and the "Dasar kata laluan" expiry setting. |
+| First-run setup | `/login` asks `GET /api/auth/setup`; when required it shows **Persediaan awal** (`staff-sign-in.tsx`) instead of the login form, then goes to the ADMIN's home. A 409 (someone finished first) falls back to the login form. |
+| Portal email | `/submit` requires an email for named complaints; BE doesn't. Anonymous shows no fields at all — only a warning of what that costs — and a "save this number now" notice after sending (rule 6, decision 11). Staff registration's anonymous mode likewise shows a notice instead of fields. Phone is labelled for staff to call by hand (rule 10). |
+| Nationality | `NationalityField` (two radio options) in the shared complainant fields. Choosing Bukan warganegara hides the IC field and drops it from the request; the passport label says "(pilihan)" for citizens. Portal marks and checks the required document (`identityDocumentErrors`), mirroring BE; staff registration can clear the choice and nothing is required. |
+| Documents | Portal: an optional "Dokumen sokongan" `DocumentPicker` (drag/drop or pick, client checks mirror BE), no ADA/TIADA question. Case file: "Dokumen sokongan" lists files as download links and lets staff add more. Staff registration keeps ADA/TIADA only and points to the case file. |
 | Signing (rule 8) | A slot is signed with a date-time read as Malaysia time; the card shows quorum as BE computes it, and once finalized shows "Muktamad · dikunci" with no sign buttons. |
 | Referral | The picker offers only active KJ / SUB_UNIT accounts; on an NFA or ever-NFA case it's replaced by a notice (clearing an existing referral stays possible). KJ / SUB_UNIT pages have no link to the case file. |
 | Role gate | `lib/access.ts`, deny by default: a console path with no rule is "Tiada akses" for every role, so KJ / SUB_UNIT land there on any Integrity Unit page (and BE answers their `/api/admin/*` calls with 403). |

@@ -36,6 +36,7 @@ export default function RootLayout({
       lang="ms"
       suppressHydrationWarning
       className={cn(
+        "light",
         "antialiased",
         fontMono.variable,
         "font-sans",
@@ -43,7 +44,13 @@ export default function RootLayout({
       )}
     >
       <body>
-        <ThemeProvider>{children}</ThemeProvider>
+        <ThemeProvider
+          attribute="class"
+          defaultTheme="light"
+          forcedTheme="light"
+        >
+          {children}
+        </ThemeProvider>
       </body>
     </html>
   )

@@ -34,17 +34,16 @@ Edit `BE/.env` and set `DATABASE_URL` for your Postgres. Postgres.app uses your 
 DATABASE_URL=postgres://YOUR_MAC_USERNAME@localhost:5432/aduan
 ```
 
-Leave `CORS_ORIGIN=http://localhost:3000` as it is unless you change the web app's port.
+`CORS_ORIGIN` must list the exact address the web app opens on. If port 3000 is taken and Next picks 3001, use `CORS_ORIGIN=http://localhost:3000,http://localhost:3001` and restart the API.
 
-Create the database, load demo data, and start the API — all from `BE/`:
+Create the database and start the API — all from `BE/`:
 
 ```bash
-npm run db:reset     # creates "aduan", applies schema.sql and migrations 001–010 (local only)
-npm run db:seed      # demo data; prints one login per role
+npm run db:reset     # creates an EMPTY "aduan", applies schema.sql and every migration (local only)
 npm run dev          # API on http://localhost:4000 — keep this terminal open
 ```
 
-`db:reset` deletes and recreates the database every time; run it again whenever you want the demo data back (followed by `db:seed`). Check the API: `curl http://localhost:4000/api/health`.
+There is no demo data. `db:reset` deletes everything and starts empty again. Check the API: `curl http://localhost:4000/api/health`.
 
 ## 3. Start the web app
 
@@ -61,19 +60,15 @@ npm run dev                    # http://localhost:3000
 
 **Staff console** — http://localhost:3000/login
 
-| Role | Email | Password | Lands on |
-| --- | --- | --- | --- |
-| KUI | `kui@demo.aduan.gov.my` | `Demo-KUI-2026!` | Dashboard (only role that sees Permohonan Perlindungan) |
-| PI / PSU / KPSU / SETIAUSAHA | `pi@…`, `psu@…`, `kpsu@…`, `setiausaha@demo.aduan.gov.my` | `Demo-<ROLE>-2026!` | Dashboard |
-| ADMIN | `admin@demo.aduan.gov.my` | `Demo-ADMIN-2026!` | Dashboard + Pengurusan Staf |
-| KJ | `kj@demo.aduan.gov.my` | `Demo-KJ-2026!` | Peti Masuk KJ (referred actions only) |
-| SUB_UNIT | `subunit@demo.aduan.gov.my` | `Demo-SUB_UNIT-2026!` | Tugasan Sub-unit (referred actions only) |
+On an empty database the page shows **Persediaan awal**: create the first ADMIN (name, email, and a password of at least 12 characters with upper case, lower case, a number and a special character). You're signed in straight away.
+
+Every later sign-in: email + password → slide the captcha piece into the gap → enter the 6-digit code printed in the **API terminal** (MFA). Accounts ADMIN creates, and passwords ADMIN resets, must set their own new password at that first login; any password older than the expiry period (180 days by default, set under Tetapan › Pengurusan staf › Dasar kata laluan) must be changed too. Five wrong passwords block an account: ADMIN clicks **Buka sekatan**, or the owner uses **Lupa kata laluan?** on the login page (code in the API terminal). That ADMIN creates every other account — KUI, PI, KJ, SUB_UNIT and so on — under Tetapan › Pengurusan staf. Setup closes for good once any staff account exists.
 
 **Complainant portal** — http://localhost:3000/me
 
-1. Enter `pengadu.demo@contoh.my` (named, 4 visible complaints) or `tanpa.nama.demo@contoh.my` (anonymous, 2).
-2. Find the 6-digit code in the **API terminal**, under `Kod log masuk anda:`.
-3. Enter it within 10 minutes. A new code can be requested after 60 seconds (5 per hour).
+1. **Daftar**: enter your name and email, then find the 6-digit code in the **API terminal** (`npm run dev` in `BE/`) and enter it. You're registered and signed in.
+2. **Log masuk** later: enter the email, then the code from the API terminal. No email is actually sent — every message is printed there.
+3. A code is valid for 10 minutes. A new one can be requested after 60 seconds (5 per hour).
 
 Anyone can also submit at `/submit` and track by reference number at `/track` without signing in.
 
@@ -95,9 +90,8 @@ cd FE && npm run typecheck && npm run lint && npm run build
 | `password authentication failed` / `role "postgres" does not exist` | `DATABASE_URL` user doesn't exist in your Postgres. With Postgres.app use your macOS username. |
 | *Tidak dapat menghubungi pelayan* when submitting, requesting a login code, or on any console page | The API isn't running (start `npm run dev` in `BE/` and keep that terminal open), `FE/.env.local` points elsewhere, or you opened the site at an address not in `CORS_ORIGIN`. Restart `npm run dev` in `FE/` after editing `.env.local`. |
 | *Permintaan ditolak oleh pelayan*, or sign-in works but every save fails | `CORS_ORIGIN` in `BE/.env` must exactly match the address in your browser (`http://localhost:3000`, not `127.0.0.1`). |
-| No login code appears | Wait 60 s between requests for the same address; the address must belong to a complaint that isn't NFA. The page shows the same message either way, on purpose. |
-| `db:migrate` refuses because a migration changed | Never edit an applied migration. Locally, `npm run db:reset && npm run db:seed`. |
-| `db:seed` refuses | It only runs on an empty database — `npm run db:reset` first. |
+| No login code appears in the API terminal | Register first (/me › Daftar) and enter that code; an unregistered, unverified address gets no login code. Wait 60 s between requests for the same address. The page shows the same message either way, on purpose — the API terminal says why. |
+| `db:migrate` refuses because a migration changed | Never edit an applied migration. Locally, `npm run db:reset` (deletes all data). |
 | Port 3000 or 4000 in use | `lsof -i :3000` to find it, or run on other ports and update `PORT`, `CORS_ORIGIN` and `NEXT_PUBLIC_API_URL` together. |
 
-More detail: [BE/README.md](BE/README.md) (endpoints, migrations, demo data), [FE/README.md](FE/README.md) (pages and shared UI), [CLAUDE.md](CLAUDE.md) (business rules).
+More detail: [BE/README.md](BE/README.md) (endpoints, migrations), [FE/README.md](FE/README.md) (pages and shared UI), [CLAUDE.md](CLAUDE.md) (business rules).

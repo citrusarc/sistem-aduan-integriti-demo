@@ -1,4 +1,5 @@
 import { TEST_DATABASE_URL } from "./env.js";
+import { createHash } from "node:crypto";
 import type { AddressInfo } from "node:net";
 import type { Server } from "node:http";
 import { createApp } from "../app.js";
@@ -8,7 +9,8 @@ import { hashPassword } from "../auth/password.js";
 import { captureEmailsForTests, type EmailMessage } from "../notify/email.js";
 import type { StaffRole } from "../types/enums.js";
 
-export const TEST_PASSWORD = "kata-laluan-ujian-12345";
+/** Meets §8 decision 14 (b): upper, lower, digit, special, 12+. */
+export const TEST_PASSWORD = "Kata-Laluan-Ujian-12345";
 
 export type ApiResponse<T = unknown> = {
   status: number;
@@ -21,10 +23,38 @@ export type Client = {
   patch<T = unknown>(path: string, body?: unknown): Promise<ApiResponse<T>>;
   put<T = unknown>(path: string, body?: unknown): Promise<ApiResponse<T>>;
   delete<T = unknown>(path: string): Promise<ApiResponse<T>>;
+  /** multipart/form-data, as the browser sends a submission with files. */
+  postForm<T = unknown>(path: string, form: FormData): Promise<ApiResponse<T>>;
+  /** The raw response, for downloads and headers. */
+  raw(path: string): Promise<Response>;
+};
+
+/**
+ * The outcome of the full staff sign-in (captcha -> password -> emailed code).
+ * `status` is the HTTP status of the step that ended it.
+ */
+export type StaffLoginResult = {
+  status: number;
+  error?: string;
+  client?: Client;
+  /** Password expired or set by ADMIN: no session until it's replaced. */
+  changeToken?: string;
 };
 
 export type TestContext = {
   anonymous: Client;
+  /**
+   * Signs staff in like the browser: solves the captcha (reading the answer
+   * from the database), posts the password, reads the emailed code. With
+   * `newPassword`, completes a required password change too.
+   */
+  staffLogin(
+    email: string,
+    password: string,
+    options?: { newPassword?: string },
+  ): Promise<StaffLoginResult>;
+  /** A fresh captcha pass token, for /auth/login or /auth/forgot-password. */
+  captchaToken(): Promise<string>;
   as(role: StaffRole): Promise<Client>;
   /** Signs a complainant in through the real OTP flow, reading the emailed code. */
   complainant(email: string): Promise<Client>;
@@ -84,6 +114,20 @@ export async function startTestContext(): Promise<TestContext> {
       patch: (path, body) => send("PATCH", path, body ?? {}),
       put: (path, body) => send("PUT", path, body ?? {}),
       delete: (path) => send("DELETE", path),
+      async postForm<T>(path: string, form: FormData) {
+        const res = await fetch(`${base}${path}`, {
+          method: "POST",
+          headers: cookie ? { Cookie: cookie } : {},
+          body: form,
+        });
+        const text = await res.text();
+        return {
+          status: res.status,
+          body: text ? JSON.parse(text) : {},
+        } as ApiResponse<T>;
+      },
+      raw: (path) =>
+        fetch(`${base}${path}`, { headers: cookie ? { Cookie: cookie } : {} }),
     };
   };
 
@@ -94,8 +138,92 @@ export async function startTestContext(): Promise<TestContext> {
       .map((c) => c.split(";")[0])
       .join("; ");
 
+  const post = (path: string, body: unknown, cookie?: string) =>
+    fetch(`${base}${path}`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...(cookie && { Cookie: cookie }),
+      },
+      body: JSON.stringify(body),
+    });
+
+  async function captchaToken(): Promise<string> {
+    const challenge = (await (await fetch(`${base}/auth/captcha`)).json()) as {
+      data: { challengeToken: string };
+    };
+    const { rows } = await query<{ target_x: number }>(
+      "SELECT target_x FROM staff_captcha_challenges WHERE id = $1",
+      [
+        createHash("sha256")
+          .update(challenge.data.challengeToken)
+          .digest("hex"),
+      ],
+    );
+    const solved = await post("/auth/captcha/verify", {
+      challengeToken: challenge.data.challengeToken,
+      x: rows[0]!.target_x,
+    });
+    const body = (await solved.json()) as { data: { captchaToken: string } };
+    return body.data.captchaToken;
+  }
+
+  async function staffLogin(
+    email: string,
+    password: string,
+    options: { newPassword?: string } = {},
+  ): Promise<StaffLoginResult> {
+    const before = emails.length;
+    const login = await post("/auth/login", {
+      email,
+      password,
+      captchaToken: await captchaToken(),
+    });
+    const loginBody = (await login.json()) as {
+      data?: { mfaToken: string };
+      error?: string;
+    };
+    if (login.status !== 200) {
+      return { status: login.status, error: loginBody.error };
+    }
+    const code = emails
+      .slice(before)
+      .filter((m) => m.to.toLowerCase() === email.toLowerCase())
+      .at(-1)
+      ?.text.match(/\b(\d{6})\b/)?.[1];
+    if (!code) throw new Error(`Tiada kod MFA dihantar kepada ${email}`);
+
+    const verified = await post("/auth/login/verify", {
+      mfaToken: loginBody.data!.mfaToken,
+      code,
+    });
+    const verifiedBody = (await verified.json()) as {
+      data?: { passwordChangeRequired?: boolean; changeToken?: string };
+      error?: string;
+    };
+    if (verified.status !== 200) {
+      return { status: verified.status, error: verifiedBody.error };
+    }
+    if (verifiedBody.data?.passwordChangeRequired) {
+      const changeToken = verifiedBody.data.changeToken!;
+      if (!options.newPassword) return { status: 200, changeToken };
+      const changed = await post("/auth/password/expired", {
+        changeToken,
+        newPassword: options.newPassword,
+      });
+      if (changed.status !== 200) {
+        const body = (await changed.json()) as { error?: string };
+        return { status: changed.status, error: body.error };
+      }
+      return { status: 200, client: clientFor(cookieFrom(changed)) };
+    }
+    return { status: 200, client: clientFor(cookieFrom(verified)) };
+  }
+
   return {
     anonymous: clientFor(),
+    staffLogin,
+    captchaToken,
     withCookie: clientFor,
     emails,
     fetch: (path, init) => fetch(`${base}${path}`, init),
@@ -129,20 +257,14 @@ export async function startTestContext(): Promise<TestContext> {
       const cached = sessions.get(role);
       if (cached) return cached;
 
-      const res = await fetch(`${base}/auth/login`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          email: emailFor(role),
-          password: TEST_PASSWORD,
-        }),
-      });
-      if (res.status !== 200) {
-        throw new Error(`Log masuk ${role} gagal: ${res.status}`);
+      const result = await staffLogin(emailFor(role), TEST_PASSWORD);
+      if (!result.client) {
+        throw new Error(
+          `Log masuk ${role} gagal: ${result.status} ${result.error ?? ""}`,
+        );
       }
-      const client = clientFor(cookieFrom(res));
-      sessions.set(role, client);
-      return client;
+      sessions.set(role, result.client);
+      return result.client;
     },
     sql: query,
     async close() {

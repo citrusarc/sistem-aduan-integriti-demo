@@ -3,7 +3,6 @@
 import * as React from "react"
 import Link from "next/link"
 import { useRouter, useSearchParams } from "next/navigation"
-import { PlusIcon } from "lucide-react"
 
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -71,14 +70,11 @@ export function MeetingList() {
         title="Mesyuarat JMM"
         description="Mesyuarat Jawatankuasa Menangani Maklumat dan agenda aduan masing-masing."
         actions={
-          <Button onClick={() => setCreating(true)}>
-            <PlusIcon data-icon="inline-start" />
-            Mesyuarat baharu
-          </Button>
+          <Button onClick={() => setCreating(true)}>Mesyuarat baharu</Button>
         }
       />
 
-      <div className="flex flex-wrap items-end gap-3 rounded-xl border border-border bg-card p-4">
+      <div className="flex flex-wrap items-end gap-3 surface-card border-border/70 bg-card p-4">
         <FormField label="Status" className="w-56">
           <MeetingStatusSelect
             value={status}

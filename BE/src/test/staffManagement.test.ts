@@ -33,22 +33,23 @@ function expectStatus<T>(res: ApiResponse<T>, status: number): T {
   return res.body.data as T;
 }
 
-/** Signs in with an email/password, returning the client and the raw status. */
+/** Full sign-in (captcha, password, emailed code); the client when a session opened. */
 async function login(email: string, password: string) {
-  const res = await ctx.fetch("/auth/login", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ email, password }),
-  });
-  const cookie = res.headers
-    .getSetCookie()
-    .map((c) => c.split(";")[0])
-    .join("; ");
-  return { status: res.status, client: ctx.withCookie(cookie) };
+  const result = await ctx.staffLogin(email, password);
+  return {
+    status: result.status,
+    changeRequired: Boolean(result.changeToken),
+    client: result.client ?? ctx.anonymous,
+  };
 }
 
+/**
+ * ADMIN-created accounts must replace their password at first login (§8
+ * decision 14). Tests about other behaviour skip that step here; the
+ * password-security tests cover it.
+ */
 async function createAccount(email: string, role: string): Promise<Account> {
-  return expectStatus<Account>(
+  const account = expectStatus<Account>(
     await admin.post("/admin/staff", {
       email,
       fullName: `Staf ${role}`,
@@ -57,6 +58,11 @@ async function createAccount(email: string, role: string): Promise<Account> {
     }),
     201,
   );
+  await ctx.sql(
+    "UPDATE staff_users SET must_change_password = false WHERE id = $1",
+    [account.id],
+  );
+  return account;
 }
 
 before(async () => {
@@ -221,7 +227,7 @@ describe("ADMIN staff operations", () => {
     const { client } = await login(account.email, TEST_PASSWORD);
     expectStatus(await client.get("/auth/me"), 200);
 
-    const newPassword = "kata-laluan-baharu-67890";
+    const newPassword = "Kata-Laluan-Baharu-67890";
     assert.equal(
       (
         await admin.post(`/admin/staff/${account.id}/password`, {
@@ -239,7 +245,10 @@ describe("ADMIN staff operations", () => {
 
     assert.equal((await client.get("/auth/me")).status, 401);
     assert.equal((await login(account.email, TEST_PASSWORD)).status, 401);
-    assert.equal((await login(account.email, newPassword)).status, 200);
+    // ADMIN set it, so the owner must replace it before getting a session.
+    const afterReset = await login(account.email, newPassword);
+    assert.equal(afterReset.status, 200);
+    assert.equal(afterReset.changeRequired, true);
     assert.equal(
       (
         await admin.post("/admin/staff/999999999/password", {

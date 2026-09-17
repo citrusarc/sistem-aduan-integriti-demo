@@ -1,4 +1,5 @@
-import { createHash, randomBytes } from "node:crypto";
+import { createHash, randomBytes, randomInt } from "node:crypto";
+import { getDummyHash, hashPassword, verifyPassword } from "./password.js";
 import type { PoolClient } from "pg";
 import { query, queryOne, withTransaction } from "../db/client.js";
 import { DomainError, isUniqueViolation } from "../db/errors.js";
@@ -26,14 +27,24 @@ type CredentialRow = {
   password_hash: string | null;
   failed_login_count: number;
   locked_until: Date | null;
+  /** §8 decision 14: ADMIN-set password, or older than the expiry period. */
+  password_change_required?: boolean;
 };
+
+/**
+ * §8 decision 14 (c): a password must be replaced once it is older than
+ * security_settings.password_max_age_days, or when ADMIN set it.
+ */
+const PASSWORD_CHANGE_REQUIRED_SQL = `(must_change_password OR (password_changed_at IS NULL
+     OR password_changed_at < now() - (SELECT password_max_age_days FROM security_settings) * INTERVAL '1 day'))`;
 
 export async function getCredentialsByEmail(
   email: string,
 ): Promise<CredentialRow | undefined> {
   return queryOne<CredentialRow>(
     `SELECT id, email, full_name, role, is_active, password_hash,
-            failed_login_count, locked_until
+            failed_login_count, locked_until,
+            ${PASSWORD_CHANGE_REQUIRED_SQL} AS password_change_required
        FROM staff_users
       WHERE lower(email) = lower($1)`,
     [email],
@@ -41,24 +52,217 @@ export async function getCredentialsByEmail(
 }
 
 /**
- * Counts a failure and, at the threshold, locks the account. Done in one
+ * Counts a failure and, at the threshold, blocks the account — §8 decision 14
+ * (d): until ADMIN unlocks it or the owner resets the password through "Lupa
+ * kata laluan" (locked_until = infinity), not for a fixed time. Done in one
  * UPDATE so concurrent guesses can't each read a stale count and slip past it.
  */
 export async function recordFailedLogin(
   staffId: string,
   maxAttempts: number,
-  lockoutMinutes: number,
 ): Promise<void> {
   await query(
     `UPDATE staff_users
         SET failed_login_count = failed_login_count + 1,
             locked_until = CASE
-              WHEN failed_login_count + 1 >= $2
-              THEN now() + ($3::int * INTERVAL '1 minute')
+              WHEN failed_login_count + 1 >= $2 THEN 'infinity'::timestamptz
               ELSE locked_until
             END
       WHERE id = $1`,
-    [staffId, maxAttempts, lockoutMinutes],
+    [staffId, maxAttempts],
+  );
+}
+
+/** ADMIN: lifts a block and resets the failure count. */
+export async function unlockStaffAccount(
+  id: string,
+): Promise<StaffAccountRow | undefined> {
+  return queryOne<StaffAccountRow>(
+    `UPDATE staff_users SET failed_login_count = 0, locked_until = NULL
+      WHERE id = $1 RETURNING ${ACCOUNT_COLUMNS}`,
+    [id],
+  );
+}
+
+// ─── Security settings — §8 decision 14 (c) ─────────────────────────────────
+
+export type SecuritySettingsRow = {
+  password_max_age_days: number;
+  updated_at: Date;
+  updated_by_name: string | null;
+};
+
+export async function getSecuritySettings(): Promise<SecuritySettingsRow> {
+  const row = await queryOne<SecuritySettingsRow>(
+    `SELECT s.password_max_age_days, s.updated_at, u.full_name AS updated_by_name
+       FROM security_settings s
+       LEFT JOIN staff_users u ON u.id = s.updated_by`,
+  );
+  if (!row) throw new Error("security_settings kosong");
+  return row;
+}
+
+export async function updateSecuritySettings(
+  passwordMaxAgeDays: number,
+  staffId: string,
+): Promise<SecuritySettingsRow> {
+  await query(
+    `UPDATE security_settings
+        SET password_max_age_days = $1, updated_by = $2, updated_at = now()`,
+    [passwordMaxAgeDays, staffId],
+  );
+  return getSecuritySettings();
+}
+
+// ─── Sign-in challenges — §8 decision 14 (a), (c), (l) ──────────────────────
+
+export type AuthChallengePurpose =
+  "LOGIN_MFA" | "PASSWORD_CHANGE" | "PASSWORD_RESET";
+
+export const STAFF_CODE_DIGITS = 6;
+const CODE_MAX_ATTEMPTS = 5;
+
+/**
+ * Starts a sign-in step. With `withCode`, a 6-digit code is generated, stored
+ * as a scrypt hash, and returned so the caller can email it. `staffId` may be
+ * null for "Lupa kata laluan" on an unknown email: the caller still gets a
+ * token that looks the same, and no code can ever satisfy it.
+ */
+export async function createAuthChallenge(input: {
+  staffId: string | null;
+  purpose: AuthChallengePurpose;
+  ttlMinutes: number;
+  withCode: boolean;
+}): Promise<{ token: string; code: string | null }> {
+  const token = randomBytes(32).toString("base64url");
+  const code = input.withCode
+    ? String(randomInt(0, 10 ** STAFF_CODE_DIGITS)).padStart(
+        STAFF_CODE_DIGITS,
+        "0",
+      )
+    : null;
+  // Hash even when there's no one to send it to, so both cost the same.
+  const codeHash = input.withCode ? await hashPassword(code ?? "") : null;
+
+  await withTransaction(async (client) => {
+    if (input.staffId) {
+      // A new challenge supersedes older ones of the same kind.
+      await client.query(
+        `UPDATE staff_auth_challenges SET consumed_at = now()
+          WHERE staff_id = $1 AND purpose = $2 AND consumed_at IS NULL`,
+        [input.staffId, input.purpose],
+      );
+    }
+    await client.query(
+      `INSERT INTO staff_auth_challenges (id, staff_id, purpose, code_hash, expires_at)
+       VALUES ($1, $2, $3, $4, now() + ($5::int * INTERVAL '1 minute'))`,
+      [
+        hashToken(token),
+        input.staffId,
+        input.purpose,
+        input.staffId ? codeHash : null,
+        input.ttlMinutes,
+      ],
+    );
+    await client.query(
+      `DELETE FROM staff_auth_challenges WHERE created_at < now() - INTERVAL '1 day'`,
+    );
+  });
+  return { token, code: input.staffId ? code : null };
+}
+
+/**
+ * Checks a code against a challenge; success consumes it and returns the
+ * staff id. A wrong code counts; at the limit even the right code is refused.
+ * Always pays for one scrypt.
+ */
+export async function verifyAuthChallengeCode(
+  token: string,
+  purpose: AuthChallengePurpose,
+  code: string,
+  /** false: leave it usable, to be spent with consumeAuthChallenge afterwards. */
+  consume = true,
+): Promise<string | null> {
+  return withTransaction(async (client) => {
+    const { rows } = await client.query<{
+      staff_id: string | null;
+      code_hash: string | null;
+      usable: boolean;
+    }>(
+      `SELECT staff_id, code_hash,
+              (consumed_at IS NULL AND expires_at > now() AND attempt_count < $3) AS usable
+         FROM staff_auth_challenges
+        WHERE id = $1 AND purpose = $2
+        FOR UPDATE`,
+      [hashToken(token), purpose, CODE_MAX_ATTEMPTS],
+    );
+    const row = rows[0];
+    const matches = await verifyPassword(
+      code,
+      row?.code_hash ?? (await getDummyHash()),
+    );
+    if (!row || !row.usable || !row.staff_id || !row.code_hash) return null;
+
+    if (!matches) {
+      await client.query(
+        `UPDATE staff_auth_challenges SET attempt_count = attempt_count + 1 WHERE id = $1`,
+        [hashToken(token)],
+      );
+      return null;
+    }
+    if (consume) {
+      await client.query(
+        `UPDATE staff_auth_challenges SET consumed_at = now() WHERE id = $1`,
+        [hashToken(token)],
+      );
+    }
+    return row.staff_id;
+  });
+}
+
+/**
+ * The staff id behind a live challenge, without spending it. Only for a token
+ * that is itself proof (PASSWORD_CHANGE is issued after password + code).
+ */
+export async function peekAuthChallengeStaff(
+  token: string,
+  purpose: AuthChallengePurpose,
+): Promise<string | null> {
+  const row = await queryOne<{ staff_id: string }>(
+    `SELECT staff_id FROM staff_auth_challenges
+      WHERE id = $1 AND purpose = $2 AND consumed_at IS NULL
+        AND expires_at > now() AND staff_id IS NOT NULL`,
+    [hashToken(token), purpose],
+  );
+  return row?.staff_id ?? null;
+}
+
+/** Spends a challenge; returns its staff id, or null if it was already spent. */
+export async function consumeAuthChallenge(
+  token: string,
+  purpose: AuthChallengePurpose,
+): Promise<string | null> {
+  const row = await queryOne<{ staff_id: string }>(
+    `UPDATE staff_auth_challenges SET consumed_at = now()
+      WHERE id = $1 AND purpose = $2 AND consumed_at IS NULL
+        AND expires_at > now() AND staff_id IS NOT NULL
+      RETURNING staff_id`,
+    [hashToken(token), purpose],
+  );
+  return row?.staff_id ?? null;
+}
+
+/** For the sign-in steps after the password: current state of the account. */
+export async function getCredentialsById(
+  staffId: string,
+): Promise<CredentialRow | undefined> {
+  return queryOne<CredentialRow>(
+    `SELECT id, email, full_name, role, is_active, password_hash,
+            failed_login_count, locked_until,
+            ${PASSWORD_CHANGE_REQUIRED_SQL} AS password_change_required
+       FROM staff_users
+      WHERE id = $1`,
+    [staffId],
   );
 }
 
@@ -165,14 +369,17 @@ export async function setPassword(
   staffId: string,
   passwordHash: string,
   keepToken?: string,
+  /** §8 decision 14 (c): true when ADMIN sets it — the owner must replace it. */
+  mustChange = false,
 ): Promise<void> {
   await withTransaction(async (client) => {
     await client.query(
       `UPDATE staff_users
           SET password_hash = $2, password_changed_at = now(),
-              failed_login_count = 0, locked_until = NULL
+              failed_login_count = 0, locked_until = NULL,
+              must_change_password = $3
         WHERE id = $1`,
-      [staffId, passwordHash],
+      [staffId, passwordHash, mustChange],
     );
     await client.query(
       `DELETE FROM staff_sessions WHERE staff_id = $1 AND id <> $2`,
@@ -194,6 +401,8 @@ export type StaffAccountRow = {
   is_active: boolean;
   has_password: boolean;
   locked: boolean;
+  must_change_password: boolean;
+  password_expired: boolean;
   last_login_at: Date | null;
   password_changed_at: Date | null;
   created_at: Date;
@@ -203,6 +412,9 @@ const ACCOUNT_COLUMNS = `
   id, email, full_name, role, is_active,
   password_hash IS NOT NULL AS has_password,
   COALESCE(locked_until > now(), FALSE) AS locked,
+  must_change_password,
+  (password_changed_at IS NULL
+     OR password_changed_at < now() - (SELECT password_max_age_days FROM security_settings) * INTERVAL '1 day') AS password_expired,
   last_login_at, password_changed_at, created_at
 `;
 
@@ -238,13 +450,21 @@ export async function createStaffAccount(input: {
   fullName: string;
   role: StaffRole;
   passwordHash: string;
+  /** ADMIN-created accounts: the owner replaces the password at first login. */
+  mustChangePassword?: boolean;
 }): Promise<StaffAccountRow> {
   try {
     const row = await queryOne<StaffAccountRow>(
-      `INSERT INTO staff_users (full_name, role, email, password_hash, password_changed_at)
-       VALUES ($1, $2, $3, $4, now())
+      `INSERT INTO staff_users (full_name, role, email, password_hash, password_changed_at, must_change_password)
+       VALUES ($1, $2, $3, $4, now(), $5)
        RETURNING ${ACCOUNT_COLUMNS}`,
-      [input.fullName, input.role, input.email, input.passwordHash],
+      [
+        input.fullName,
+        input.role,
+        input.email,
+        input.passwordHash,
+        input.mustChangePassword ?? false,
+      ],
     );
     if (!row) throw new Error("Gagal mencipta akaun staf");
     return row;
@@ -343,4 +563,54 @@ export async function setStaffActive(
     }
     return result.rows[0]!;
   });
+}
+
+/** §8 decision 13: first-run setup is open only while this is true. */
+export async function hasNoStaffAccounts(): Promise<boolean> {
+  const row = await queryOne<{ empty: boolean }>(
+    `SELECT NOT EXISTS (SELECT 1 FROM staff_users) AS empty`,
+  );
+  return row?.empty ?? false;
+}
+
+/**
+ * First-run setup (§8 decision 13): creates the first ADMIN, and only while no
+ * staff account exists at all. The check and the insert share an advisory
+ * lock, so two simultaneous setups can't both succeed; afterwards every
+ * account is created by an ADMIN (or the CLI).
+ */
+export async function createFirstAdmin(input: {
+  email: string;
+  fullName: string;
+  passwordHash: string;
+}): Promise<CredentialRow> {
+  try {
+    return await withTransaction(async (client) => {
+      await client.query(
+        "SELECT pg_advisory_xact_lock(hashtext('staff:first-run-setup'))",
+      );
+      const existing = await client.query(`SELECT 1 FROM staff_users LIMIT 1`);
+      if (existing.rowCount) {
+        throw new DomainError(
+          409,
+          "Persediaan awal telah selesai. Log masuk, atau minta ADMIN mencipta akaun anda.",
+        );
+      }
+      const inserted = await client.query<CredentialRow>(
+        `INSERT INTO staff_users (full_name, role, email, password_hash, password_changed_at)
+         VALUES ($1, 'ADMIN', $2, $3, now())
+         RETURNING id, email, full_name, role, is_active, password_hash,
+                   failed_login_count, locked_until`,
+        [input.fullName, input.email, input.passwordHash],
+      );
+      const row = inserted.rows[0];
+      if (!row) throw new Error("Gagal mencipta akaun ADMIN");
+      return row;
+    });
+  } catch (err) {
+    if (isUniqueViolation(err)) {
+      throw new DomainError(409, "E-mel ini sudah digunakan oleh akaun lain");
+    }
+    throw err;
+  }
 }

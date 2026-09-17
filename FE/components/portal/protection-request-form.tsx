@@ -90,7 +90,7 @@ function ProtectionRequestForm() {
 
   if (done) {
     return (
-      <section className="flex flex-col items-center gap-3 rounded-xl border border-border bg-card px-6 py-10 text-center">
+      <section className="flex flex-col items-center gap-3 surface-card border-border/70 bg-card px-6 py-10 text-center">
         <CheckCircle2Icon
           className="size-10 text-status-selesai-foreground"
           aria-hidden
@@ -163,7 +163,7 @@ function ProtectionRequestForm() {
     <form
       onSubmit={submit}
       noValidate
-      className="flex flex-col gap-5 rounded-xl border border-border bg-card p-5"
+      className="flex flex-col gap-5 surface-card border-border/70 bg-card p-5"
     >
       <p className="text-sm text-muted-foreground">
         Log masuk sebagai <strong className="text-foreground">{email}</strong>.

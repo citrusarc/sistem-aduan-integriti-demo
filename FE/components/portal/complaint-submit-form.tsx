@@ -2,19 +2,21 @@
 
 import * as React from "react"
 import Link from "next/link"
-import { CheckCircle2Icon, CopyIcon, EyeOffIcon, UserIcon } from "lucide-react"
+import { CheckCircle2Icon, EyeOffIcon, UserIcon } from "lucide-react"
 
 import {
   AccusedPersonFields,
   ComplainantDetailsFields,
   EMPTY_ACCUSED,
   EMPTY_COMPLAINANT,
-  SupportingDocumentsField,
   complainantBody,
   complainantFormatErrors,
+  identityDocumentErrors,
   type AccusedPerson,
   type ComplainantDetails,
 } from "@/components/complaints/borang-aduan-fields"
+import { DocumentPicker } from "@/components/complaints/document-picker"
+import { useComplainantSession } from "@/components/providers/complainant-session"
 import { Button, buttonVariants } from "@/components/ui/button"
 import { IntegrityCategorySelect } from "@/components/ui/enum-select"
 import { CheckboxField, FieldControl, FormField } from "@/components/ui/field"
@@ -37,7 +39,8 @@ type FormState = {
   incidentTime: string
   integrityCategory: IntegrityCategory | null
   caseDescription: string
-  hasSupportingDocuments: boolean | null
+  /** DOKUMEN SOKONGAN, optional. BE records ADA from whether any are sent. */
+  files: File[]
   disclaimer: boolean
 }
 
@@ -50,7 +53,7 @@ const INITIAL: FormState = {
   incidentTime: "",
   integrityCategory: null,
   caseDescription: "",
-  hasSupportingDocuments: null,
+  files: [],
   disclaimer: false,
 }
 
@@ -65,11 +68,17 @@ type Errors = Partial<
 >
 
 function validate(form: FormState): Errors {
-  const e: Errors = complainantFormatErrors(form.complainant, form.isAnonymous)
+  // Anonymous sends no complainant details, so there is nothing to check.
+  const e: Errors = form.isAnonymous
+    ? {}
+    : {
+        ...identityDocumentErrors(form.complainant),
+        ...complainantFormatErrors(form.complainant, false),
+      }
   if (!form.isAnonymous && !form.complainant.particulars.trim()) {
     e.particulars = "Nyatakan nama anda, atau pilih aduan tanpa nama"
   }
-  if (!form.complainant.contactEmail.trim()) {
+  if (!form.isAnonymous && !form.complainant.contactEmail.trim()) {
     e.contactEmail = "E-mel diperlukan supaya kami boleh menghubungi anda"
   }
   if (form.incidentDate && form.incidentDate > todayIso()) {
@@ -92,10 +101,13 @@ const text = (v: string) => (v.trim() ? v.trim() : null)
  * BORANG ADUAN/ MAKLUMAT (Lampiran 2): butir-butir pengadu, maklumat aduan,
  * then the disclaimer. The receiver's section of the form is BE's to fill.
  *
- *   - Named needs a name; anonymous stores no name or identifying details.
- *   - A contact email is required either way — the only channel for status
- *     updates and for the committee to reach the complainant. Phones are
- *     optional and only for staff to call by hand; nothing is sent to them.
+ *   - Named needs a name and an email. Phones are optional and only for staff
+ *     to call by hand; nothing is sent to them.
+ *   - Anonymous asks for nothing at all, not even an email (§8 decision 11),
+ *     and says plainly what that costs: no acknowledgement, no follow-up, no
+ *     login — only the reference number shown after sending.
+ *   - Supporting documents are an optional upload; there is no ADA/TIADA
+ *     question (BE records ADA when files are attached).
  *   - Everything else on the form is optional.
  *   - The handling disclaimer must be acknowledged, every time.
  *   - A possible repeat comes back as 409 with only a count (no other
@@ -113,6 +125,28 @@ export function ComplaintSubmitForm() {
   const [invalidAttempt, setInvalidAttempt] = React.useState(0)
 
   const errors = touched ? validate(form) : {}
+
+  // A signed-in complainant (§8 decision 13): start the named form with their
+  // account's name and email, once. Complaints link to accounts by email, so
+  // keeping it lets the complaint appear under "Aduan saya".
+  const complainantSession = useComplainantSession()
+  const signedIn =
+    complainantSession.status === "authenticated"
+      ? complainantSession.session
+      : null
+  const prefilled = React.useRef(false)
+  React.useEffect(() => {
+    if (!signedIn || prefilled.current) return
+    prefilled.current = true
+    setForm((prev) => ({
+      ...prev,
+      complainant: {
+        ...prev.complainant,
+        particulars: prev.complainant.particulars || (signedIn.fullName ?? ""),
+        contactEmail: prev.complainant.contactEmail || signedIn.email,
+      },
+    }))
+  }, [signedIn])
 
   React.useEffect(() => {
     if (invalidAttempt === 0) return
@@ -149,22 +183,28 @@ export function ComplaintSubmitForm() {
     setSubmitting(true)
     setError(null)
     try {
-      const created = await publicApi.submitComplaint({
-        accusedParticulars: text(form.accused1.particulars),
-        accusedDepartment: text(form.accused1.department),
-        accusedPosition: text(form.accused1.position),
-        accused2Particulars: text(form.accused2.particulars),
-        accused2Department: text(form.accused2.department),
-        accused2Position: text(form.accused2.position),
-        incidentDate: form.incidentDate || null,
-        incidentTime: form.incidentTime || null,
-        integrityCategory: form.integrityCategory,
-        caseDescription: text(form.caseDescription),
-        hasSupportingDocuments: form.hasSupportingDocuments,
-        complainant: complainantBody(form.complainant, form.isAnonymous),
-        disclaimerAcknowledged: true,
-        duplicateCheckAcknowledged,
-      })
+      const created = await publicApi.submitComplaint(
+        {
+          accusedParticulars: text(form.accused1.particulars),
+          accusedDepartment: text(form.accused1.department),
+          accusedPosition: text(form.accused1.position),
+          accused2Particulars: text(form.accused2.particulars),
+          accused2Department: text(form.accused2.department),
+          accused2Position: text(form.accused2.position),
+          incidentDate: form.incidentDate || null,
+          incidentTime: form.incidentTime || null,
+          integrityCategory: form.integrityCategory,
+          caseDescription: text(form.caseDescription),
+          // Anonymous sends nothing about the complainant, whatever was typed
+          // into the named fields before switching.
+          complainant: form.isAnonymous
+            ? { isAnonymous: true }
+            : complainantBody(form.complainant, false),
+          disclaimerAcknowledged: true,
+          duplicateCheckAcknowledged,
+        },
+        form.files
+      )
       setSubmitted(created)
     } catch (err) {
       const count = possibleDuplicateCountOf(err)
@@ -187,7 +227,8 @@ export function ComplaintSubmitForm() {
       <div ref={scrollIntoViewOnMount} className="scroll-mt-24">
         <Success
           complaint={submitted}
-          email={form.complainant.contactEmail.trim()}
+          email={form.isAnonymous ? "" : form.complainant.contactEmail.trim()}
+          documentCount={form.files.length}
         />
       </div>
     )
@@ -202,7 +243,7 @@ export function ComplaintSubmitForm() {
       }}
       className="flex flex-col gap-6"
     >
-      <fieldset className="flex flex-col gap-4 rounded-xl border border-border bg-card p-5">
+      <fieldset className="flex flex-col gap-4 surface-card border-border/70 bg-card p-5">
         <legend className="sr-only">Butir-butir pengadu</legend>
         <h2 className="text-base font-semibold text-primary" aria-hidden>
           1. Butir-butir pengadu
@@ -224,7 +265,7 @@ export function ComplaintSubmitForm() {
                 true,
                 EyeOffIcon,
                 "Tanpa nama",
-                "Nama dan butiran peribadi tidak disimpan.",
+                "Tiada sebarang butiran diminta, termasuk e-mel.",
               ],
             ] as const
           ).map(([anonymous, Icon, title, body]) => (
@@ -253,34 +294,36 @@ export function ComplaintSubmitForm() {
         </div>
 
         {form.isAnonymous ? (
-          <Notice tone="info">
-            <strong>Aduan tanpa nama:</strong> kami tidak akan tahu siapa anda,
-            jadi e-mel ialah satu-satunya cara untuk memaklumkan status atau
-            meminta maklumat lanjut. Gunakan alamat yang anda boleh semak —
-            alamat berasingan juga dibenarkan. Aduan tanpa maklumat yang cukup
-            mungkin tidak dapat disiasat.
-          </Notice>
+          <AnonymousNotice />
         ) : (
-          <p className="text-sm text-muted-foreground">
-            Hanya nama dan e-mel diwajibkan. Butiran lain membantu pegawai
-            mengesahkan dan menghubungi anda, dan dirahsiakan oleh Unit
-            Integriti.
-          </p>
+          <>
+            {signedIn && (
+              <Notice tone="info">
+                Anda log masuk sebagai <strong>{signedIn.email}</strong>. Aduan
+                dengan e-mel ini dipaparkan di Aduan saya.
+              </Notice>
+            )}
+            <p className="text-sm text-muted-foreground">
+              Nama, warganegara, no. kad pengenalan (atau no. pasport bagi bukan
+              warganegara) dan e-mel diwajibkan. Butiran lain membantu pegawai
+              mengesahkan dan menghubungi anda, dan dirahsiakan oleh Unit
+              Integriti.
+            </p>
+            <ComplainantDetailsFields
+              value={form.complainant}
+              onChange={updateComplainant}
+              errors={errors}
+              audience="portal"
+              nameRequired
+              identityRequired
+              emailRequired
+              emailDescription="Pengesahan, no. rujukan dan makluman status dihantar ke sini."
+            />
+          </>
         )}
-
-        <ComplainantDetailsFields
-          value={form.complainant}
-          onChange={updateComplainant}
-          errors={errors}
-          anonymous={form.isAnonymous}
-          audience="portal"
-          nameRequired
-          emailRequired
-          emailDescription="Pengesahan, no. rujukan dan makluman status dihantar ke sini."
-        />
       </fieldset>
 
-      <fieldset className="flex flex-col gap-5 rounded-xl border border-border bg-card p-5">
+      <fieldset className="flex flex-col gap-5 surface-card border-border/70 bg-card p-5">
         <legend className="sr-only">Maklumat aduan</legend>
         <h2 className="text-base font-semibold text-primary" aria-hidden>
           2. Maklumat aduan
@@ -338,16 +381,27 @@ export function ComplaintSubmitForm() {
             />
           </FormField>
         </div>
-        <SupportingDocumentsField
-          value={form.hasSupportingDocuments}
-          onChange={(v) => update("hasSupportingDocuments", v)}
-          description="Jangan lampirkan dokumen di sini. Jika ada, pegawai akan menghubungi anda melalui e-mel untuk mendapatkannya."
-        />
+        <fieldset className="flex flex-col gap-1.5">
+          <legend className="mb-1.5 text-sm font-medium">
+            Dokumen sokongan{" "}
+            <span className="font-normal text-muted-foreground">(pilihan)</span>
+          </legend>
+          <DocumentPicker
+            files={form.files}
+            onChange={(files) => update("files", files)}
+            disabled={submitting}
+            note={
+              form.isAnonymous
+                ? "Maklumat tersembunyi dalam gambar (lokasi, kamera, masa) dibuang secara automatik. Nama pengarang dalam PDF atau DOCX tidak dibuang — semak sifat dokumen sebelum memuat naik."
+                : "Dokumen, gambar atau tangkapan layar yang menyokong aduan. Tidak dapat memuat naik sekarang? Hantar aduan dahulu; pegawai akan menghubungi anda melalui e-mel."
+            }
+          />
+        </fieldset>
       </fieldset>
 
       <section
         aria-labelledby="disclaimer-heading"
-        className="flex flex-col gap-3 rounded-xl border border-accent/50 bg-card p-5"
+        className="flex flex-col gap-3 surface-card border-accent/50 bg-card p-5"
       >
         <h2
           id="disclaimer-heading"
@@ -365,8 +419,9 @@ export function ComplaintSubmitForm() {
             Keputusan bergantung pada maklumat yang diberikan.
           </li>
           <li>
-            Aduan tanpa nama diterima, tetapi kami mungkin tidak dapat
-            meneruskannya jika maklumat tidak mencukupi dan e-mel tidak dijawab.
+            Aduan tanpa nama diterima tanpa sebarang butiran pengadu. Kami tidak
+            dapat menghubungi anda, jadi aduan mungkin tidak dapat diteruskan
+            jika maklumat tidak mencukupi.
           </li>
           <li>
             Makluman dihantar melalui e-mel sahaja. Kami tidak akan menghantar
@@ -386,7 +441,7 @@ export function ComplaintSubmitForm() {
       {duplicates !== null ? (
         <div
           ref={scrollIntoViewCenteredOnMount}
-          className="flex flex-col gap-3 rounded-xl border border-accent/60 bg-status-dalam-tindakan/40 p-5"
+          className="flex flex-col gap-3 surface-card border-accent/60 bg-status-dalam-tindakan/40 p-5"
         >
           <h2 className="font-semibold text-status-dalam-tindakan-foreground">
             Aduan ini mungkin sudah pernah dibuat
@@ -431,18 +486,39 @@ export function ComplaintSubmitForm() {
   )
 }
 
+/**
+ * Anonymous (§8 decision 11): nothing about the complainant is asked or
+ * stored — not even an email, like a surat layang. The complainant should
+ * choose that knowingly, so the cost is spelled out before sending.
+ */
+function AnonymousNotice() {
+  return (
+    <Notice tone="warning" className="flex flex-col gap-1.5 px-4 py-3">
+      <strong>Tiada sebarang butiran anda disimpan — termasuk e-mel.</strong>
+      <span>
+        Oleh itu, kami tidak dapat menghantar pengesahan, memaklumkan
+        perkembangan atau meminta maklumat lanjut, dan anda tidak boleh log
+        masuk. No. rujukan hanya dipaparkan sekali selepas aduan dihantar —
+        simpan nombor itu untuk menyemak status.
+      </span>
+    </Notice>
+  )
+}
+
 function Success({
   complaint,
   email,
+  documentCount,
 }: {
   complaint: PublicComplaint
   email: string
+  documentCount: number
 }) {
   const [copied, setCopied] = React.useState(false)
   return (
     <section
       aria-labelledby="submitted-heading"
-      className="flex flex-col items-center gap-4 rounded-xl border border-border bg-card px-6 py-10 text-center"
+      className="flex flex-col items-center gap-4 surface-card border-border/70 bg-card px-6 py-10 text-center"
     >
       <CheckCircle2Icon
         className="size-10 text-status-selesai-foreground"
@@ -467,13 +543,25 @@ function Success({
             .then(() => setCopied(true))
         }}
       >
-        <CopyIcon data-icon="inline-start" />
         {copied ? "Disalin" : "Salin no. rujukan"}
       </Button>
-      <p className="max-w-md text-sm">
-        Simpan nombor ini — ia diperlukan untuk menyemak status. Pengesahan juga
-        dihantar ke <strong>{email}</strong>.
-      </p>
+      {email ? (
+        <p className="max-w-md text-sm">
+          Simpan nombor ini — ia diperlukan untuk menyemak status. Pengesahan
+          juga dihantar ke <strong>{email}</strong>.
+        </p>
+      ) : (
+        <Notice tone="warning" className="max-w-md text-left">
+          <strong>Simpan nombor ini sekarang.</strong> Tiada e-mel pengesahan
+          dihantar, dan nombor ini tidak boleh dipaparkan semula — ia
+          satu-satunya cara untuk menyemak status aduan anda.
+        </Notice>
+      )}
+      {documentCount > 0 && (
+        <p className="text-sm text-muted-foreground">
+          {documentCount} dokumen sokongan diterima bersama aduan.
+        </p>
+      )}
       <div className="flex flex-wrap justify-center gap-2">
         <Link href="/track" className={buttonVariants()}>
           Semak status

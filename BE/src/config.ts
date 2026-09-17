@@ -26,14 +26,33 @@ export const config = {
     .map((origin) => origin.trim())
     .filter(Boolean),
 
+  /**
+   * Supporting documents (§8 decision 10). Stored on this machine's disk —
+   * there is no cloud storage. The directory holds evidence: back it up, and
+   * never serve it statically.
+   */
+  uploads: {
+    dir: process.env.UPLOAD_DIR ?? "uploads",
+    maxFileBytes: Number(process.env.UPLOAD_MAX_FILE_MB ?? 10) * 1024 * 1024,
+    /** Per request, for the portal submission and a staff upload alike. */
+    maxFilesPerRequest: 5,
+    /** Across a complaint's lifetime. */
+    maxFilesPerComplaint: 20,
+  },
+
   auth: {
     cookieName: "aduan_sid",
     /** Hard cap on a session regardless of activity — one working day. */
     sessionTtlMinutes: Number(process.env.SESSION_TTL_MINUTES ?? 8 * 60),
     /** Signed out after this long without a request. */
     idleTimeoutMinutes: Number(process.env.SESSION_IDLE_MINUTES ?? 30),
-    maxFailedLogins: Number(process.env.AUTH_MAX_FAILED_LOGINS ?? 5),
-    lockoutMinutes: Number(process.env.AUTH_LOCKOUT_MINUTES ?? 15),
+    /**
+     * §8 decision 14 (d): wrong passwords before the account is blocked — until
+     * ADMIN unlocks it or the owner resets it. Five, per the policy.
+     */
+    maxFailedLogins: 5,
+    /** Email code (MFA, password reset) and password-change token lifetime. */
+    codeTtlMinutes: 10,
     /**
      * SameSite=Lax works when FE and BE share a registrable domain (true for
      * localhost:3000 -> localhost:4000, and for app.x.gov.my -> api.x.gov.my).

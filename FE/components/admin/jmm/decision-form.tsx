@@ -1,7 +1,7 @@
 "use client"
 
 import * as React from "react"
-import { PlusIcon, Trash2Icon } from "lucide-react"
+import { Trash2Icon } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import { Dialog } from "@/components/ui/dialog"
@@ -277,7 +277,7 @@ export function DecisionFormDialog({
           </FormField>
         </div>
 
-        <fieldset className="flex flex-col gap-3 rounded-lg bg-muted/50 p-3">
+        <fieldset className="flex flex-col gap-3 rounded-xl bg-muted/50 p-3">
           <legend className="sr-only">Blok tandatangan</legend>
           <div className="flex items-center justify-between gap-2">
             <p className="text-sm font-semibold" aria-hidden>
@@ -299,7 +299,6 @@ export function DecisionFormDialog({
                 ])
               }
             >
-              <PlusIcon data-icon="inline-start" />
               Tambah penandatangan
             </Button>
           </div>
