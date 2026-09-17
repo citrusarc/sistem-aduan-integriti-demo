@@ -31,17 +31,19 @@ pelayan".
 | Path | Who | What |
 | --- | --- | --- |
 | `/` | Public | Landing: how complaints are handled, links to submit and track |
-| `/faq` | Public | Questions and answers. Deliberately never explains a "not found" beyond a typo (rule 2) |
-| `/submit` | Public | Complaint form: named or anonymous, email required (browser-side — BE only requires it for anonymous), phone labelled staff-call-only, disclaimer, possible-duplicate confirmation (BE returns only a count). Shows the reference number |
-| `/track` | Public | Look up by reference number. NFA, unknown and malformed numbers render the same message |
-| `/me` | Complainant | Email OTP sign-in, then their own complaints with each one's latest protection request status |
-| `/me/complaints/[ref]` | Complainant | One complaint in the public-safe shape, and its protection requests. `[ref]` is the reference number with `/` written as `.` (`UI.2026.00012`, see `lib/ref-slug.ts`); someone else's, NFA and unknown all show one "not found" |
+| `/hubungi` | Public | Contact details (`lib/contact.ts`), map, and the FAQ (`/faq` redirects here). The FAQ never explains a "not found" beyond a typo (rule 2) |
+| `/submit` | Public | Complaint form (Lampiran 2): named (name, nationality with IC or passport, email required) or anonymous (no details at all), phone labelled staff-call-only, optional supporting documents, disclaimer, possible-duplicate confirmation (BE returns only a count). Shows the reference number |
+| `/track` | Public | Look up by reference number, with the status timeline. NFA, unknown and malformed numbers render the same message |
+| `/me` | Complainant | Log masuk / Daftar by email code (hidden input, eye button), then their own complaints with each one's latest protection request status |
+| `/me/complaints/[ref]` | Complainant | One complaint in the public-safe shape with its status timeline, and its protection requests. `[ref]` is the reference number with `/` written as `.` (`UI.2026.00012`, see `lib/ref-slug.ts`); someone else's, NFA and unknown all show one "not found" |
 | `/submit/protection` | Complainant | Pick one of their own complaints (those with a pending request are left out; `?aduan=` preselects only their own) and give a reason |
-| `/login`, `/tiada-akses` | Staff | Sign in; where a wrong-role user lands |
+| `/login` | Staff | First-run setup when no staff exist; otherwise password → slider captcha → emailed code → new password if expired or ADMIN-set |
+| `/lupa-kata-laluan` | Staff | Reset by email + captcha + code; lifts a block |
+| `/tiada-akses` | Staff | Where a wrong-role user lands |
 | `/dashboard` | Integrity Unit | Counts by stored status, recent cases |
 | `/complaints` | Integrity Unit | Register with status, category, sector, channel and period filters in the URL, paged |
 | `/complaints/new` | Integrity Unit | Registration. A 409 shows the candidate cases; the officer must tick a confirmation, and any edit clears it |
-| `/complaints/[id]` | Integrity Unit | Case file: details, decisions with signature block and quorum, signing, case actions, referral to KJ / SUB_UNIT (not on NFA cases), close case |
+| `/complaints/[id]` | Integrity Unit | Case file: details, status history, supporting documents (download, add), decisions with signature block and quorum, signing, case actions, referral to KJ / SUB_UNIT (not on NFA cases), close case |
 | `/jmm` | Integrity Unit | Meetings, create meeting |
 | `/jmm/[meetingId]` | Integrity Unit | Agenda: add, reorder, remove; record decisions; mark the meeting done. Read-only once done |
 | `/jmm/decisions` | Integrity Unit | Decision log filtered by outcome, meeting and date range |
@@ -49,7 +51,7 @@ pelayan".
 | `/protection-requests` | KUI | **Placeholder** — review through the API for now |
 | `/kj/inbox`, `/subunit/tasks` | KJ, SUB_UNIT | Actions referred to them; edit response date and feedback status only |
 | `/settings` | Every staff role | Own account and password |
-| `/settings/staff` | ADMIN | Create, set role, reset password, deactivate / activate |
+| `/settings/staff` | ADMIN | Create, set role, reset password, unblock, deactivate / activate; password expiry period |
 
 Page bodies are client components in `components/admin/*` and
 `components/portal/*`; `app/**/page.tsx` files only set metadata, read route
