@@ -38,16 +38,14 @@ npm run dev                    # http://localhost:3000
 
 There is no demo data. On first run:
 
-1. **First staff account:** open `/login`. With no staff accounts yet, it shows **Persediaan awal**; create the first ADMIN there.
-2. **Other staff:** that ADMIN creates every other account under **Tetapan › Pengurusan staf**.
-3. **Complainants:** they register themselves at `/me` › **Daftar**.
+1. **First ADMIN:** `INITIAL_ADMIN_EMAIL` in `BE/.env` (set to `badrul@badrulhanif.com`). Register that address at `/daftar` and enter the emailed code. While no active ADMIN exists, that account becomes ADMIN.
+2. **Everyone else** registers at `/daftar` too and starts as **Pengadu**. ADMIN gives staff their role under **Tetapan › Pengurusan akaun** (or creates accounts there directly).
 
 ## Signing in
 
 | Who | How |
 | --- | --- |
-| **Staff** | Email + password → slider image captcha → 6-digit code from the API terminal. Passwords need 12+ characters with upper case, lower case, a number and a special character. They expire after 180 days (ADMIN can change the period). A password ADMIN sets must be replaced at first login. Five wrong passwords block the account until ADMIN unlocks it or the owner uses **Lupa kata laluan?** |
-| **Complainant** | No password. Register once with name + email, then sign in with a 6-digit code from the API terminal. |
+| **Everyone with an account** (staff and complainants, one page: `/login`) | Email + password → slider image captcha → 6-digit code from the API terminal. Passwords need 12+ characters with upper case, lower case, a number and a special character. They expire after 180 days (ADMIN can change the period). A password ADMIN sets must be replaced at first login. Five wrong passwords block the account until ADMIN unlocks it or the owner uses **Lupa kata laluan?** The role decides what opens: a Pengadu goes to `/me`, staff to their console. |
 | **Anyone** | Submit a complaint and track it by reference number without signing in. |
 
 Passwords and codes are hidden while typed, with an eye button to show them.
@@ -57,11 +55,11 @@ Passwords and codes are hidden while typed, with an eye button to show them.
 | Who | Pages | Can do |
 | --- | --- | --- |
 | Public | `/`, `/submit`, `/track`, `/hubungi` | **Submit** a complaint, named or anonymous, laid out as BORANG ADUAN (Lampiran 2), with an optional supporting-document upload. **Track** by reference number, including a status timeline. **Hubungi Kami** has the unit's contact details and the FAQ. |
-| Complainant | `/me`, `/me/complaints/[ref]`, `/submit/protection` | Register and sign in, see their own complaints with status timelines, request whistleblower protection. |
+| Signed in (any role) | `/me`, `/me/complaints/[ref]`, `/submit/protection` | See their own complaints (by account email) with status timelines, request whistleblower protection. |
 | Integrity Unit (`KUI PI PSU KPSU SETIAUSAHA ADMIN`) | `/dashboard`, `/complaints`, `/complaints/new`, `/complaints/[id]`, `/jmm`, `/jmm/[meetingId]`, `/jmm/decisions`, `/reports`, `/settings` | **Cases:** register with the duplicate check, and work each case file (status history, supporting documents, JMM decisions and signing to quorum, case actions, referral to KJ / sub-unit, closing). **JMM:** meetings, agendas, decision log. **Reports:** counts and breakdowns. |
-| ADMIN | `/settings/staff` | Create staff, set roles, reset passwords, unblock, deactivate or activate, and set the password expiry period. |
+| ADMIN | `/settings/staff` | Every account (Kakitangan / Pengadu tabs): promote a registered Pengadu to a staff role, create accounts, reset passwords, unblock, deactivate or activate, and set the password expiry period. |
 | KJ / SUB_UNIT | `/kj/inbox`, `/subunit/tasks`, `/settings` | See actions referred to them (five fields and the reference number) and update the two fields they may change. |
-| Staff (no session needed) | `/login`, `/lupa-kata-laluan` | Sign in, first-run setup, password reset. |
+| Anyone (no session needed) | `/login`, `/daftar`, `/lupa-kata-laluan` | Sign in, register, password reset. |
 
 **Not built yet:** the KUI screen for reviewing protection requests. `/protection-requests` is a placeholder, but the API endpoint `POST /api/admin/protection-requests/:id/review` works.
 

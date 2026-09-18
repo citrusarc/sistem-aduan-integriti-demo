@@ -4,7 +4,7 @@ import * as React from "react"
 import Link from "next/link"
 import { ArrowLeftIcon } from "lucide-react"
 
-import { useStaffSession } from "@/components/providers/staff-session"
+import { useSession } from "@/components/providers/session"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { DateDisplay } from "@/components/ui/date-display"
@@ -43,16 +43,22 @@ type Mode =
   | { kind: "unlock"; account: StaffAccount }
 
 /**
- * §8 decision 7 — ADMIN only (BE: requireStaff("ADMIN")). Neither this nor the
- * CLI can leave the system without an active ADMIN; BE answers 409 and the
- * message is shown as is.
+ * §8 decisions 7 and 15 — ADMIN only (BE: permission users.manage). Every
+ * account is here, staff and registered complainants alike: someone who
+ * registered is PENGADU until ADMIN gives them a staff role. Neither this nor
+ * the CLI can leave the system without an active ADMIN; BE answers 409 and
+ * the message is shown as is.
  */
 export function StaffManagement() {
-  const session = useStaffSession()
-  const selfId = session.status === "authenticated" ? session.staff.id : null
+  const session = useSession()
+  const selfId = session.status === "authenticated" ? session.user.id : null
   const accounts = useApiData("staff", () => adminApi.staff.list())
   const [mode, setMode] = React.useState<Mode | null>(null)
   const [flash, setFlash] = React.useState<string | null>(null)
+  const [view, setView] = React.useState<"staff" | "pengadu">("staff")
+  const rows = accounts.data?.filter((a) =>
+    view === "pengadu" ? a.role === "PENGADU" : a.role !== "PENGADU"
+  )
 
   async function done(text: string) {
     setMode(null)
@@ -70,8 +76,8 @@ export function StaffManagement() {
         Tetapan akaun
       </Link>
       <PageHeader
-        title="Pengurusan Staf"
-        description="Perubahan peranan berkuat kuasa pada permintaan seterusnya. Set semula kata laluan dan nyahaktif melog keluar akaun serta-merta."
+        title="Pengurusan Akaun"
+        description="Semua akaun, termasuk pengadu yang mendaftar sendiri. Untuk menjadikan seseorang kakitangan, tukar peranannya daripada Pengadu. Perubahan peranan berkuat kuasa pada permintaan seterusnya; set semula kata laluan dan nyahaktif melog keluar akaun serta-merta."
         actions={
           <Button
             onClick={() => {
@@ -88,15 +94,56 @@ export function StaffManagement() {
 
       <SecuritySettingsCard />
 
+      <div
+        role="tablist"
+        aria-label="Jenis akaun"
+        className="grid w-fit grid-cols-2 gap-1 rounded-xl bg-muted p-1"
+      >
+        {(
+          [
+            ["staff", "Kakitangan"],
+            ["pengadu", "Pengadu"],
+          ] as const
+        ).map(([value, label]) => (
+          <button
+            key={value}
+            type="button"
+            role="tab"
+            aria-selected={view === value}
+            onClick={() => setView(value)}
+            className={
+              view === value
+                ? "rounded-lg bg-card px-4 py-1.5 text-sm font-medium text-foreground shadow-sm"
+                : "rounded-lg px-4 py-1.5 text-sm font-medium text-muted-foreground hover:text-foreground"
+            }
+          >
+            {label}
+            {accounts.data && (
+              <span className="ml-1.5 text-xs text-muted-foreground">
+                {
+                  accounts.data.filter((a) =>
+                    value === "pengadu"
+                      ? a.role === "PENGADU"
+                      : a.role !== "PENGADU"
+                  ).length
+                }
+              </span>
+            )}
+          </button>
+        ))}
+      </div>
+
       {accounts.status === "error" ? (
         <ErrorState
           error={accounts.error}
           onRetry={() => void accounts.reload()}
         />
-      ) : !accounts.data ? (
+      ) : !rows ? (
         <LoadingState />
-      ) : accounts.data.length === 0 ? (
-        <EmptyState title="Tiada akaun" />
+      ) : rows.length === 0 ? (
+        <EmptyState
+          title={view === "pengadu" ? "Tiada pengadu berdaftar" : "Tiada akaun"}
+        />
       ) : (
         <Table>
           <TableHeader>
@@ -110,7 +157,7 @@ export function StaffManagement() {
             </TableRow>
           </TableHeader>
           <TableBody>
-            {accounts.data.map((a) => (
+            {rows.map((a) => (
               <TableRow
                 key={a.id}
                 className={a.isActive ? undefined : "text-muted-foreground"}
@@ -136,6 +183,9 @@ export function StaffManagement() {
                     )}
                     {!a.hasPassword && (
                       <Badge tone="outline">Tiada kata laluan</Badge>
+                    )}
+                    {!a.emailVerified && (
+                      <Badge tone="outline">E-mel belum disahkan</Badge>
                     )}
                   </span>
                 </TableCell>

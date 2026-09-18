@@ -1,8 +1,7 @@
 import { Router } from "express";
 import { z } from "zod";
 import { HttpError } from "../middleware/error-handler.js";
-import { requireStaff } from "../middleware/auth.js";
-import { REFERRAL_RECIPIENT_ROLES } from "../auth/roles.js";
+import { requirePermission } from "../middleware/auth.js";
 import { idSchema } from "../validation/common.js";
 import { updateReferredActionSchema } from "../validation/staff.js";
 import {
@@ -22,10 +21,10 @@ import { toReferredAction } from "../db/mappers.js";
  * the accused party, JMM data, or anything on an NFA complaint.
  */
 export const referralsRouter: Router = Router();
-referralsRouter.use(requireStaff(...REFERRAL_RECIPIENT_ROLES));
+referralsRouter.use(requirePermission("referrals.respond"));
 
 referralsRouter.get("/actions", async (req, res) => {
-  const rows = await listReferredActions(req.staff!.id);
+  const rows = await listReferredActions(req.user!.id);
   res.json({ data: rows.map(toReferredAction) });
 });
 
@@ -39,7 +38,7 @@ referralsRouter.patch("/actions/:id", async (req, res) => {
   }
 
   // Not yours, on an NFA complaint, or missing: the same 404 for all three.
-  const row = await updateReferredAction(req.staff!.id, id, parsed.data);
+  const row = await updateReferredAction(req.user!.id, id, parsed.data);
   if (!row) throw new HttpError(404, "Tindakan tidak dijumpai");
 
   res.json({ data: toReferredAction(row) });

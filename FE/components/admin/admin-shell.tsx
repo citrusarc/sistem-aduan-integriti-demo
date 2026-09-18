@@ -19,7 +19,7 @@ import {
   type LucideIcon,
 } from "lucide-react"
 
-import { useStaffSession } from "@/components/providers/staff-session"
+import { useSession } from "@/components/providers/session"
 import { Button } from "@/components/ui/button"
 import { ErrorState, LoadingState } from "@/components/ui/states"
 import {
@@ -49,7 +49,8 @@ const ICONS: Record<NavIcon, LucideIcon> = {
  * The console gate and chrome.
  *
  *   no session            -> /login?next=<this page>
- *   role can't open page  -> /tiada-akses?dari=<this page>
+ *   no console (PENGADU)  -> /me, the complainant's own page
+ *   can't open page       -> /tiada-akses?dari=<this page>
  *
  * This runs in the browser because the session cookie is scoped to BE's /api
  * path and never reaches Next's server. It decides only what to render; BE
@@ -60,13 +61,13 @@ const ICONS: Record<NavIcon, LucideIcon> = {
  * data requests for a user who is about to be redirected.
  */
 export function AdminShell({ children }: { children: React.ReactNode }) {
-  const session = useStaffSession()
+  const session = useSession()
   const pathname = usePathname()
   const router = useRouter()
   const signingOut = React.useRef(false)
 
-  const role = session.status === "authenticated" ? session.staff.role : null
-  const allowed = role !== null && canAccess(role, pathname)
+  const user = session.status === "authenticated" ? session.user : null
+  const allowed = user !== null && canAccess(user, pathname)
 
   React.useEffect(() => {
     if (session.status === "anonymous") {
@@ -75,10 +76,12 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
           ? "/login"
           : `/login?next=${encodeURIComponent(pathname)}`
       )
-    } else if (role !== null && !canAccess(role, pathname)) {
+    } else if (user && !user.hasConsole) {
+      router.replace("/me")
+    } else if (user && !canAccess(user, pathname)) {
       router.replace(`/tiada-akses?dari=${encodeURIComponent(pathname)}`)
     }
-  }, [session.status, role, pathname, router])
+  }, [session.status, user, pathname, router])
 
   // Re-check the session on every console navigation, quietly (no loading
   // flash). A deactivated account, an expired session, or a role changed by
@@ -116,7 +119,7 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
     )
   }
 
-  const sections = navFor(session.staff.role)
+  const sections = navFor(session.user)
 
   async function signOut() {
     signingOut.current = true
@@ -128,8 +131,8 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
       <Sidebar
         sections={sections}
         pathname={pathname}
-        staffName={session.staff.fullName}
-        roleLabel={STAFF_ROLE[session.staff.role]}
+        staffName={session.user.fullName}
+        roleLabel={STAFF_ROLE[session.user.role]}
         onSignOut={signOut}
       />
       <main className="min-w-0 flex-1 p-4 md:p-8">{children}</main>

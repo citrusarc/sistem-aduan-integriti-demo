@@ -1,8 +1,7 @@
 import { Router } from "express";
 import { z } from "zod";
 import { HttpError } from "../middleware/error-handler.js";
-import { requireStaff } from "../middleware/auth.js";
-import { INTEGRITY_UNIT_ROLES } from "../auth/roles.js";
+import { requirePermission } from "../middleware/auth.js";
 import { statsFiltersSchema } from "../validation/stats.js";
 import { getComplaintStats } from "../db/queries/stats.js";
 
@@ -11,7 +10,7 @@ import { getComplaintStats } from "../db/queries/stats.js";
  * cases (rule 2), so this must never move under a less restricted gate.
  */
 export const adminStatsRouter: Router = Router();
-adminStatsRouter.use(requireStaff(...INTEGRITY_UNIT_ROLES));
+adminStatsRouter.use(requirePermission("reports.view"));
 
 /** `year`, `month` (month requires year). */
 adminStatsRouter.get("/", async (req, res) => {

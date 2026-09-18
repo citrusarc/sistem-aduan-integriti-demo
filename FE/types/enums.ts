@@ -134,6 +134,9 @@ export const STAFF_ROLE = {
   ADMIN: "Admin",
   KJ: "Ketua Jabatan",
   SUB_UNIT: "Sub-unit",
+  // §8 decision 15: a registered complainant. Every self-registration starts
+  // here; ADMIN gives staff their role.
+  PENGADU: "Pengadu",
 } as const
 
 /**
@@ -159,6 +162,23 @@ export type StaffRole = keyof typeof STAFF_ROLE
 export const REFERRAL_RECIPIENT_ROLES: readonly StaffRole[] = ["KJ", "SUB_UNIT"]
 
 /**
+ * Permissions (§8 decision 15). Mirrors PERMISSIONS in
+ * BE/src/auth/permissions.ts; which role holds which comes from BE in
+ * GET /api/auth/me, so the matrix itself is never copied here.
+ */
+export const PERMISSION = [
+  "complaints.manage",
+  "jmm.manage",
+  "reports.view",
+  "protection.review",
+  "referrals.respond",
+  "users.manage",
+  "security.manage",
+  "portal.use",
+] as const
+export type Permission = (typeof PERMISSION)[number]
+
+/**
  * complaint_status_enum — stored on `complaints.status` and written by the API
  * on each transition (CLAUDE.md §4). Render through StatusPill.
  */
@@ -168,6 +188,8 @@ export const COMPLAINT_STATUS = {
   DALAM_TINDAKAN: "Dalam Tindakan",
   SELESAI: "Selesai",
   NFA: "NFA",
+  // §8 decision 16: staff confirmed it repeats an existing case.
+  PENDUA: "Pendua",
 } as const
 export type ComplaintStatus = keyof typeof COMPLAINT_STATUS
 

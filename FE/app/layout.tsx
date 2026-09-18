@@ -2,6 +2,7 @@ import type { Metadata } from "next"
 import { Geist, Geist_Mono } from "next/font/google"
 
 import "./globals.css"
+import { SessionProvider } from "@/components/providers/session"
 import { ThemeProvider } from "@/components/theme-provider"
 import { cn } from "@/lib/utils"
 
@@ -22,9 +23,9 @@ export const metadata: Metadata = {
 }
 
 /**
- * Root layout shared by both route groups. Everything group-specific — the
- * portal chrome and complainant session, the console chrome and staff
- * session — lives in `(portal)/layout.tsx` and `(admin)/layout.tsx`.
+ * Root layout shared by every route group. The one session (§8 decision 15)
+ * lives here, so the portal, the sign-in pages and the console agree on who is
+ * signed in; each group's chrome lives in its own layout.
  */
 export default function RootLayout({
   children,
@@ -49,7 +50,7 @@ export default function RootLayout({
           defaultTheme="light"
           forcedTheme="light"
         >
-          {children}
+          <SessionProvider>{children}</SessionProvider>
         </ThemeProvider>
       </body>
     </html>

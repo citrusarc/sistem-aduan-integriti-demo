@@ -4,8 +4,8 @@ import * as React from "react"
 import Link from "next/link"
 import { useRouter, useSearchParams } from "next/navigation"
 
-import { SliderCaptcha } from "@/components/admin/slider-captcha"
-import { useStaffSession } from "@/components/providers/staff-session"
+import { SliderCaptcha } from "@/components/auth/slider-captcha"
+import { useSession } from "@/components/providers/session"
 import { Button } from "@/components/ui/button"
 import { FormField } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
@@ -15,7 +15,7 @@ import {
 } from "@/components/ui/password-input"
 import { Notice } from "@/components/ui/section"
 import { LoadingState } from "@/components/ui/states"
-import { canAccess, homeFor, safeNextPath } from "@/lib/access"
+import { destinationFor } from "@/lib/access"
 import { ApiRequestError } from "@/lib/api"
 import {
   changeExpiredPassword,
@@ -24,13 +24,6 @@ import {
   submitPassword,
 } from "@/lib/auth"
 import { errorMessage } from "@/lib/errors"
-import type { StaffRole } from "@/types/enums"
-
-/** Where to go after signing in: `?next=` if it's safe and the role may open it. */
-function destination(role: StaffRole, next: string | null): string {
-  const path = safeNextPath(next)
-  return path && canAccess(role, path) ? path : homeFor(role)
-}
 
 /** Locally, BE prints outgoing email (and so every code) to its terminal. */
 const LOCAL_DEV = process.env.NODE_ENV !== "production"
@@ -42,7 +35,8 @@ type Step =
   | { kind: "change"; changeToken: string }
 
 /**
- * Staff sign-in — §8 decision 14:
+ * Sign-in for every account, staff and complainant alike (§8 decisions 14
+ * and 15):
  *   email + password  ->  slider captcha  ->  6-digit code sent by email
  *   ->  (new password, if expired or set by ADMIN)  ->  signed in
  *
@@ -50,7 +44,7 @@ type Step =
  * email exists.
  */
 export function LoginForm() {
-  const session = useStaffSession()
+  const session = useSession()
   const router = useRouter()
   const next = useSearchParams().get("next")
 
@@ -63,15 +57,15 @@ export function LoginForm() {
   const [busy, setBusy] = React.useState(false)
   const [error, setError] = React.useState<string | null>(null)
 
-  const signedInRole =
-    session.status === "authenticated" ? session.staff.role : null
+  const user = session.status === "authenticated" ? session.user : null
 
-  // Already signed in (or just signed in): leave the login page.
+  // Already signed in (or just signed in): leave the login page — a
+  // complainant for their own page, staff for their console home.
   React.useEffect(() => {
-    if (signedInRole) router.replace(destination(signedInRole, next))
-  }, [signedInRole, next, router])
+    if (user) router.replace(destinationFor(user, next))
+  }, [user, next, router])
 
-  if (session.status === "loading" || signedInRole) {
+  if (session.status === "loading" || user) {
     return <LoadingState label="Menyemak sesi…" />
   }
 
@@ -297,6 +291,15 @@ export function LoginForm() {
           Log masuk
         </Button>
       )}
+      <p className="text-center text-sm text-muted-foreground">
+        Belum ada akaun?{" "}
+        <Link
+          href={next ? `/daftar?next=${encodeURIComponent(next)}` : "/daftar"}
+          className="font-medium text-primary underline-offset-4 hover:underline"
+        >
+          Daftar
+        </Link>
+      </p>
       <Link
         href="/"
         className="text-center text-sm text-muted-foreground underline-offset-4 hover:underline"

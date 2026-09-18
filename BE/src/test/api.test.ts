@@ -950,7 +950,7 @@ describe("stats", () => {
       "SELECT status::text, count(*)::int AS n FROM complaints GROUP BY 1",
     );
     const expected = new Map(rows.map((r) => [r.status, r.n]));
-    assert.equal(all.byStatus.length, 5, "every status bucket present");
+    assert.equal(all.byStatus.length, 6, "every status bucket present");
     for (const bucket of all.byStatus) {
       assert.equal(
         bucket.count,

@@ -1,9 +1,10 @@
 import { api, ApiRequestError } from "@/lib/api"
-import type { StaffRole } from "@/types/enums"
+import type { Permission, StaffRole } from "@/types/enums"
 
 /**
- * Client helpers for staff auth. The session itself is an httpOnly cookie that
- * JavaScript cannot read — these functions only ask BE about it.
+ * Client helpers for sign-in and registration — one flow for staff and
+ * complainants (§8 decisions 14 and 15). The session itself is an httpOnly
+ * cookie that JavaScript cannot read — these functions only ask BE about it.
  *
  * Anything here is for deciding what to SHOW. The API enforces access on every
  * request; hiding a link does not protect the data behind it.
@@ -34,7 +35,7 @@ export function meetsPasswordPolicy(password: string): boolean {
   return PASSWORD_REQUIREMENTS.every((r) => r.test(password))
 }
 
-// ─── Staff sign-in steps (§8 decision 14) ────────────────────────────────────
+// ─── Sign-in steps (§8 decision 14) ──────────────────────────────────────────
 
 export type Captcha = {
   challengeToken: string
@@ -55,7 +56,7 @@ export const verifyCaptcha = (challengeToken: string, x: number) =>
     json: { challengeToken, x },
   })
 
-export type SignedInStaff = CurrentStaff & { sessionExpiresAt: string }
+export type SignedIn = CurrentUser
 
 /** Correct password: a code is emailed; nothing is signed in yet. */
 export const submitPassword = (
@@ -69,7 +70,7 @@ export const submitPassword = (
   })
 
 export const submitLoginCode = (mfaToken: string, code: string) =>
-  api<SignedInStaff | { passwordChangeRequired: true; changeToken: string }>(
+  api<SignedIn | { passwordChangeRequired: true; changeToken: string }>(
     "/auth/login/verify",
     { method: "POST", json: { mfaToken, code } }
   )
@@ -78,7 +79,7 @@ export const changeExpiredPassword = (
   changeToken: string,
   newPassword: string
 ) =>
-  api<SignedInStaff>("/auth/password/expired", {
+  api<SignedIn>("/auth/password/expired", {
     method: "POST",
     json: { changeToken, newPassword },
   })
@@ -99,41 +100,49 @@ export const resetPassword = (
     json: { resetToken, code, newPassword },
   })
 
-export type CurrentStaff = {
+/** §8 decision 15: name + email + password; a code is emailed to confirm. */
+export const register = (input: {
+  fullName: string
+  email: string
+  password: string
+  captchaToken: string
+}) =>
+  api<{ verifyToken: string; sentTo: string; message: string }>(
+    "/auth/register",
+    { method: "POST", json: input }
+  )
+
+export const verifyRegistration = (verifyToken: string, code: string) =>
+  api<SignedIn>("/auth/register/verify", {
+    method: "POST",
+    json: { verifyToken, code },
+  })
+
+export type CurrentUser = {
   id: string
   email: string
   fullName: string
   role: StaffRole
-  /** False for KJ and SUB_UNIT — they are refused by every /api/admin/* route. */
+  /** From BE; decides what to SHOW. BE checks the permission on every request. */
+  permissions: Permission[]
+  /** False for KJ, SUB_UNIT and PENGADU — refused by every /api/admin/* route. */
   isIntegrityUnit: boolean
+  /** False for PENGADU: the portal only. */
+  hasConsole: boolean
+  sessionExpiresAt: string
 }
 
-/** §8 decision 13: true only while no staff account exists (never in production). */
-export async function getSetupStatus(): Promise<boolean> {
-  const status = await api<{ setupRequired: boolean }>("/auth/setup")
-  return status.setupRequired
-}
-
-/** Creates the first ADMIN and signs them in. 409 once any account exists. */
-export async function setupFirstAdmin(input: {
-  fullName: string
-  email: string
-  password: string
-}) {
-  return api<CurrentStaff & { sessionExpiresAt: string }>("/auth/setup", {
-    method: "POST",
-    json: input,
-  })
-}
+export const can = (user: CurrentUser, permission: Permission) =>
+  user.permissions.includes(permission)
 
 export async function logout(): Promise<void> {
   await api<void>("/auth/logout", { method: "POST" }).catch(() => undefined)
 }
 
-/** The signed-in staff member, or null when there's no valid session. */
-export async function getCurrentStaff(): Promise<CurrentStaff | null> {
+/** The signed-in account, or null when there's no valid session. */
+export async function getCurrentUser(): Promise<CurrentUser | null> {
   try {
-    return await api<CurrentStaff>("/auth/me")
+    return await api<CurrentUser>("/auth/me")
   } catch (err) {
     if (err instanceof ApiRequestError && err.status === 401) return null
     throw err

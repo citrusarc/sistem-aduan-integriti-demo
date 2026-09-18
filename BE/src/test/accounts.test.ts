@@ -1,15 +1,21 @@
 /**
- * §8 decision 13 over the real HTTP API: first-run ADMIN setup, complainant
- * registration by email OTP, and the public status timeline.
+ * §8 decisions 13 and 15 over the real HTTP API: one registration and sign-in
+ * for everybody, roles and permissions, the initial ADMIN, and the public
+ * status timeline.
  */
 import assert from "node:assert/strict";
 import { after, before, describe, it } from "node:test";
 import {
   startTestContext,
+  TEST_PASSWORD,
   type ApiResponse,
   type Client,
   type TestContext,
 } from "./harness.js";
+import { config } from "../config.js";
+import { PERMISSIONS, ROLE_PERMISSIONS } from "../auth/permissions.js";
+import { INTEGRITY_UNIT_ROLES } from "../auth/roles.js";
+import { STAFF_ROLE } from "../types/enums.js";
 
 let ctx: TestContext;
 let seq = 0;
@@ -31,6 +37,15 @@ const cookieFrom = (res: Response) =>
 
 const codeIn = (text: string) => text.match(/\b(\d{6})\b/)?.[1];
 
+type SignedIn = {
+  email: string;
+  fullName: string;
+  role: string;
+  permissions: string[];
+  isIntegrityUnit: boolean;
+  hasConsole: boolean;
+};
+
 before(async () => {
   ctx = await startTestContext();
 });
@@ -39,198 +54,247 @@ after(async () => {
   await ctx.close();
 });
 
-// ─── First-run setup ─────────────────────────────────────────────────────────
+const lastCodeTo = (email: string) => {
+  const message = ctx.emails
+    .filter((m) => m.to === email.toLowerCase())
+    .at(-1);
+  return message ? codeIn(message.text) : undefined;
+};
 
-describe("first-run ADMIN setup", () => {
-  const setup = (body: Record<string, unknown>) =>
-    ctx.fetch("/auth/setup", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    });
+async function registerAndVerify(email: string, fullName: string) {
+  const registered = await ctx.register({ email, fullName });
+  assert.equal(registered.status, 202);
+  const { data } = (await registered.json()) as {
+    data: { verifyToken: string };
+  };
+  return ctx.fetch("/auth/register/verify", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      verifyToken: data.verifyToken,
+      code: lastCodeTo(email),
+    }),
+  });
+}
 
-  it("is open only while no staff account exists, and signs the new ADMIN in", async () => {
-    // The harness creates one account per role; setup must be closed.
-    assert.deepEqual(
-      expectStatus(await ctx.anonymous.get("/auth/setup"), 200),
-      { setupRequired: false },
-    );
-    const closed = await setup({
-      email: "penceroboh@contoh.my",
-      fullName: "Penceroboh",
-      password: "Kata-Laluan-Panjang-9",
-    });
-    assert.equal(closed.status, 409);
+// ─── Roles and permissions ───────────────────────────────────────────────────
 
-    // A brand-new installation: no staff at all.
-    await ctx.sql("DELETE FROM staff_sessions");
-    await ctx.sql("DELETE FROM staff_users");
-    assert.deepEqual(
-      expectStatus(await ctx.anonymous.get("/auth/setup"), 200),
-      { setupRequired: true },
-    );
-
-    assert.equal(
-      (
-        await setup({
-          email: "admin@contoh.my",
-          fullName: "Admin",
-          password: "pendek",
-        })
-      ).status,
-      422,
-    );
-    assert.equal(
-      (
-        await setup({
-          email: "bukan-emel",
-          fullName: "Admin",
-          password: "Kata-Laluan-Panjang-9",
-        })
-      ).status,
-      422,
-    );
-
-    // Two at once: exactly one wins.
-    const results = await Promise.all(
-      ["pertama@contoh.my", "kedua@contoh.my"].map((email) =>
-        setup({
-          email,
-          fullName: "Pentadbir Pertama",
-          password: "Kata-Laluan-Panjang-9",
-        }),
-      ),
-    );
-    const statuses = results.map((r) => r.status).sort();
-    assert.deepEqual(statuses, [201, 409]);
-    const winner = results.find((r) => r.status === 201)!;
-    const body = (await winner.json()) as { data: { role: string } };
-    assert.equal(body.data.role, "ADMIN");
-
-    // The cookie it set is a working ADMIN session.
-    const admin: Client = ctx.withCookie(cookieFrom(winner));
-    const me = expectStatus<{ role: string }>(await admin.get("/auth/me"), 200);
-    assert.equal(me.role, "ADMIN");
-    expectStatus(await admin.get("/admin/staff"), 200);
-
-    const { rows } = await ctx.sql<{ n: number }>(
-      "SELECT count(*)::int AS n FROM staff_users",
-    );
-    assert.equal(rows[0]?.n, 1);
-    assert.deepEqual(
-      expectStatus(await ctx.anonymous.get("/auth/setup"), 200),
-      { setupRequired: false },
-    );
+describe("permissions (§8 decision 15)", () => {
+  it("only Integrity Unit roles hold a permission that reaches NFA cases or internal notes", () => {
+    const internal = ["complaints.manage", "jmm.manage", "reports.view"];
+    for (const role of STAFF_ROLE) {
+      const isUnit = (INTEGRITY_UNIT_ROLES as readonly string[]).includes(role);
+      for (const permission of internal) {
+        assert.equal(
+          ROLE_PERMISSIONS[role].includes(permission as never),
+          isUnit,
+          `${role} / ${permission}`,
+        );
+      }
+      assert.ok(ROLE_PERMISSIONS[role].includes("portal.use"));
+    }
+    assert.deepEqual(ROLE_PERMISSIONS.PENGADU, ["portal.use"]);
+    assert.ok(ROLE_PERMISSIONS.ADMIN.every((p) => PERMISSIONS.includes(p)));
   });
 });
 
-// ─── Complainant registration ────────────────────────────────────────────────
+// ─── Registration ────────────────────────────────────────────────────────────
 
-describe("complainant registration", () => {
-  const register = (email: string, fullName: string) =>
-    ctx.anonymous.post<{ message: string }>("/complainant/auth/register", {
-      email,
-      fullName,
-    });
-
-  const verify = (email: string, code: string) =>
-    ctx.fetch("/complainant/auth/verify", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ email, code }),
-    });
-
-  const lastCodeTo = (email: string) => {
-    const message = ctx.emails.filter((m) => m.to === email).at(-1);
-    return message ? codeIn(message.text) : undefined;
-  };
-
-  it("registers with name and email, verified by the emailed code, with no complaint needed", async () => {
+describe("registration (§8 decision 15)", () => {
+  it("registers name + email + password, verified by the emailed code, as PENGADU", async () => {
     const email = "baharu.daftar@contoh.my";
-
-    // Before registering, a login code isn't sent.
-    const before = ctx.emails.length;
-    expectStatus(
-      await ctx.anonymous.post("/complainant/auth/request-code", { email }),
-      202,
+    const verified = await registerAndVerify(
+      " Baharu.Daftar@Contoh.MY ".trim(),
+      "Aminah Baharu",
     );
-    assert.equal(ctx.emails.length, before);
-
-    expectStatus(
-      await register(" Baharu.Daftar@Contoh.MY ", "Aminah Baharu"),
-      202,
-    );
-    const code = lastCodeTo(email);
-    assert.ok(code, "a registration code is emailed");
-
-    const verified = await verify(email, code!);
     assert.equal(verified.status, 200);
-    const session = (await verified.json()) as {
-      data: { email: string; fullName: string };
-    };
-    assert.deepEqual(
-      { email: session.data.email, fullName: session.data.fullName },
-      { email, fullName: "Aminah Baharu" },
-    );
+    const session = ((await verified.json()) as { data: SignedIn }).data;
+    assert.equal(session.email, email);
+    assert.equal(session.fullName, "Aminah Baharu");
+    assert.equal(session.role, "PENGADU");
+    assert.deepEqual(session.permissions, ["portal.use"]);
+    assert.equal(session.hasConsole, false);
+    assert.equal(session.isIntegrityUnit, false);
 
-    const complainant = ctx.withCookie(cookieFrom(verified));
-    const me = expectStatus<{ fullName: string }>(
-      await complainant.get("/complainant/auth/me"),
-      200,
+    const me = ctx.withCookie(cookieFrom(verified));
+    assert.equal(
+      expectStatus<SignedIn>(await me.get("/auth/me"), 200).role,
+      "PENGADU",
     );
-    assert.equal(me.fullName, "Aminah Baharu");
     assert.deepEqual(
-      expectStatus(await complainant.get("/complainant/complaints"), 200),
+      expectStatus(await me.get("/complainant/complaints"), 200),
       [],
     );
 
-    // Signing in later works without any complaint.
-    const sent = ctx.emails.length;
-    await ctx.sql(
-      "UPDATE complainant_otp_codes SET created_at = now() - INTERVAL '2 minutes' WHERE email = $1",
-      [email],
-    );
-    expectStatus(
-      await ctx.anonymous.post("/complainant/auth/request-code", { email }),
-      202,
-    );
-    assert.equal(ctx.emails.length, sent + 1);
+    // Later sign-ins are the same steps as staff: captcha, password, code.
+    const login = await ctx.staffLogin(email, TEST_PASSWORD);
+    assert.ok(login.client, JSON.stringify(login));
   });
 
-  it("an unverified sign-up can't sign in, and a verified account can't be renamed by re-registering", async () => {
-    const pending = "belum.sah@contoh.my";
-    expectStatus(await register(pending, "Belum Sah"), 202);
-    const sent = ctx.emails.length;
-    await ctx.sql(
-      "UPDATE complainant_otp_codes SET created_at = now() - INTERVAL '2 minutes' WHERE email = $1",
-      [pending],
+  it("applies the staff password policy and needs a captcha", async () => {
+    const weak = await ctx.register({
+      email: "lemah@contoh.my",
+      fullName: "Kata Lemah",
+      password: "pendek",
+    });
+    assert.equal(weak.status, 422);
+    const noUpper = await ctx.register({
+      email: "lemah@contoh.my",
+      fullName: "Kata Lemah",
+      password: "tiada-huruf-besar-123",
+    });
+    assert.equal(noUpper.status, 422);
+    assert.equal(
+      (
+        await ctx.register({
+          email: "bukan-emel",
+          fullName: "Nama Betul",
+        })
+      ).status,
+      422,
     );
-    expectStatus(
-      await ctx.anonymous.post("/complainant/auth/request-code", {
-        email: pending,
-      }),
+    const noCaptcha = await ctx.anonymous.post("/auth/register", {
+      email: "tanpa.captcha@contoh.my",
+      fullName: "Tanpa Captcha",
+      password: TEST_PASSWORD,
+    });
+    assert.equal(noCaptcha.status, 400);
+  });
+
+  it("an unverified sign-up can't sign in; re-registering it replaces the password", async () => {
+    const email = "belum.sah@contoh.my";
+    assert.equal(
+      (await ctx.register({ email, fullName: "Belum Sah" })).status,
       202,
     );
-    assert.equal(ctx.emails.length, sent, "no login code before verifying");
+    const wrong = await ctx.staffLogin(email, "Salah-Kata-Laluan-99");
+    assert.equal(wrong.status, 401);
+    const right = await ctx.staffLogin(email, TEST_PASSWORD);
+    assert.equal(right.status, 403, "said only after a correct password");
 
-    const email = "sudah.sah@contoh.my";
-    await register(email, "Nama Asal");
-    assert.equal((await verify(email, lastCodeTo(email)!)).status, 200);
-    await ctx.sql(
-      "UPDATE complainant_otp_codes SET created_at = now() - INTERVAL '2 minutes' WHERE email = $1",
-      [email],
+    const other = "Kata-Laluan-Lain-4567!";
+    assert.equal(
+      (await ctx.register({ email, fullName: "Belum Sah", password: other }))
+        .status,
+      202,
     );
-    expectStatus(await register(email, "Nama Penyamar"), 202);
+    assert.equal((await ctx.staffLogin(email, TEST_PASSWORD)).status, 401);
+  });
+
+  it("re-registering a verified address changes nothing and answers the same", async () => {
+    const email = "sudah.sah@contoh.my";
+    assert.equal((await registerAndVerify(email, "Nama Asal")).status, 200);
+
+    const before = ctx.emails.length;
+    const again = await ctx.register({
+      email,
+      fullName: "Nama Penyamar",
+      password: "Kata-Penyamar-9999!",
+    });
+    assert.equal(again.status, 202);
+    const body = (await again.json()) as {
+      data: { verifyToken: string; sentTo: string; message: string };
+    };
+    assert.deepEqual(Object.keys(body.data).sort(), [
+      "message",
+      "sentTo",
+      "verifyToken",
+    ]);
+    // The owner is told; no code is sent, and no code can satisfy the token.
+    const notice = ctx.emails.slice(before).find((m) => m.to === email);
+    assert.ok(notice && !codeIn(notice.text));
+    const guess = await ctx.anonymous.post("/auth/register/verify", {
+      verifyToken: body.data.verifyToken,
+      code: "123456",
+    });
+    assert.equal(guess.status, 401);
+
     const { rows } = await ctx.sql<{ full_name: string }>(
-      "SELECT full_name FROM complainant_accounts WHERE email = $1",
+      "SELECT full_name FROM staff_users WHERE email = $1",
       [email],
     );
     assert.equal(rows[0]?.full_name, "Nama Asal");
+    assert.ok((await ctx.staffLogin(email, TEST_PASSWORD)).client);
   });
 
-  it("refuses a missing name or a bad email", async () => {
-    assert.equal((await register("ok@contoh.my", " ")).status, 422);
-    assert.equal((await register("bukan-emel", "Nama Betul")).status, 422);
+  it("a PENGADU is refused by every console and referral API", async () => {
+    const pengadu = await ctx.complainant("pengadu.biasa@contoh.my");
+    for (const path of [
+      "/admin/complaints",
+      "/admin/decisions",
+      "/admin/jmm/meetings",
+      "/admin/stats",
+      "/admin/protection-requests",
+      "/admin/staff",
+      "/admin/settings/security",
+      "/referrals/actions",
+    ]) {
+      assert.equal((await pengadu.get(path)).status, 403, path);
+    }
+  });
+
+  it("ADMIN gives a registered account a role; it applies on the next request", async () => {
+    const email = "bakal.pi@contoh.my";
+    const user = await ctx.complainant(email);
+    assert.equal((await user.get("/admin/complaints")).status, 403);
+
+    const admin = await ctx.as("ADMIN");
+    const accounts = expectStatus<
+      { id: string; email: string; role: string }[]
+    >(await admin.get("/admin/staff"), 200);
+    const account = accounts.find((a) => a.email === email)!;
+    assert.equal(account.role, "PENGADU");
+    expectStatus(
+      await admin.put(`/admin/staff/${account.id}/role`, { role: "PI" }),
+      200,
+    );
+    expectStatus(await user.get("/admin/complaints"), 200);
+  });
+});
+
+// ─── Initial ADMIN ───────────────────────────────────────────────────────────
+
+describe("initial ADMIN (§8 decision 15)", () => {
+  after(() => {
+    config.initialAdminEmail = null;
+  });
+
+  it("INITIAL_ADMIN_EMAIL becomes ADMIN by proving the address, only while no active ADMIN exists", async () => {
+    config.initialAdminEmail = "badrul@contoh.my";
+
+    // An active ADMIN exists (the harness's): registering stays PENGADU.
+    const first = await registerAndVerify("badrul@contoh.my", "Badrul");
+    assert.equal(
+      ((await first.json()) as { data: SignedIn }).data.role,
+      "PENGADU",
+    );
+
+    // No active ADMIN any more: the next sign-in (password + code) promotes.
+    await ctx.sql(
+      "UPDATE staff_users SET is_active = FALSE WHERE role = 'ADMIN'",
+    );
+    const other = await ctx.complainant("orang.lain@contoh.my");
+    assert.equal(
+      expectStatus<SignedIn>(await other.get("/auth/me"), 200).role,
+      "PENGADU",
+      "another address is never promoted",
+    );
+    const login = await ctx.staffLogin("badrul@contoh.my", TEST_PASSWORD);
+    assert.ok(login.client);
+    const me = expectStatus<SignedIn>(await login.client.get("/auth/me"), 200);
+    assert.equal(me.role, "ADMIN");
+    assert.ok(me.permissions.includes("users.manage"));
+    expectStatus(await login.client.get("/admin/staff"), 200);
+
+    // Now there is an ADMIN: nothing else gets promoted.
+    const again = await ctx.complainant("orang.ketiga@contoh.my");
+    assert.equal(
+      expectStatus<SignedIn>(await again.get("/auth/me"), 200).role,
+      "PENGADU",
+    );
+    await ctx.sql(
+      "UPDATE staff_users SET is_active = TRUE WHERE email = 'admin@ujian.gov.my'",
+    );
   });
 });
 
@@ -239,18 +303,7 @@ describe("complainant registration", () => {
 describe("status timeline (public)", () => {
   let kui: Client;
   before(async () => {
-    // The setup test above removed the harness's staff; add a KUI back.
-    await ctx.sql(
-      `INSERT INTO staff_users (full_name, role, email, password_hash, password_changed_at)
-       SELECT 'Ujian KUI 2', 'KUI', 'kui2@ujian.my', password_hash, now()
-         FROM staff_users WHERE role = 'ADMIN' LIMIT 1`,
-    );
-    const login = await ctx.staffLogin(
-      "kui2@ujian.my",
-      "Kata-Laluan-Panjang-9",
-    );
-    assert.ok(login.client, JSON.stringify(login));
-    kui = login.client;
+    kui = await ctx.as("KUI");
   });
 
   type Timeline = { status: string; changedAt: string }[];
@@ -340,23 +393,7 @@ describe("status timeline (public)", () => {
     assert.ok(!JSON.stringify(tracked).includes("RINGKASAN-RAHSIA"));
 
     // The complainant's own view carries the same timeline; the list doesn't.
-    const verifyEmail = "garis.masa@contoh.my";
-    const requested = await ctx.anonymous.post(
-      "/complainant/auth/request-code",
-      {
-        email: verifyEmail,
-      },
-    );
-    assert.equal(requested.status, 202);
-    const code = codeIn(
-      ctx.emails.filter((m) => m.to === verifyEmail).at(-1)!.text,
-    )!;
-    const verified = await ctx.fetch("/complainant/auth/verify", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ email: verifyEmail, code }),
-    });
-    const complainant = ctx.withCookie(cookieFrom(verified));
+    const complainant = await ctx.complainant("garis.masa@contoh.my");
     const own = expectStatus<{ timeline: Timeline }>(
       await complainant.get(
         `/complainant/complaints/${encodeURIComponent(complaintRefNo)}`,

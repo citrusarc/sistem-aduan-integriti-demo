@@ -74,8 +74,21 @@ export type AdminComplaint = {
   receivedVia: ReceivedVia | null
   status: ComplaintStatus
   statusChangedAt: string
+  /** §8 decision 16: flagged at registration as a likely repeat of this id. */
+  suspectedDuplicateOfId: string | null
+  /** 0..1, with the suspicion. */
+  duplicateScore: number | null
+  /** Set while status is PENDUA: the case this one repeats. */
+  duplicateOfId: string | null
   createdAt: string
   updatedAt: string
+}
+
+/** Another complaint named on a case file. */
+export type ComplaintLink = {
+  id: string
+  complaintRefNo: string
+  status: ComplaintStatus
 }
 
 export type JmmSignatory = {
@@ -165,6 +178,11 @@ export type AdminComplaintDetail = AdminComplaint & {
   attachments: ComplaintAttachment[]
   /** Every status the case has entered, oldest first (§8 decision 13). */
   timeline: StatusTimelineEntry[]
+  /** §8 decision 16: why the system thinks this repeats another case. */
+  suspectedDuplicate:
+    | (ComplaintLink & { score: number; reasons: string[] })
+    | null
+  duplicateOf: ComplaintLink | null
 }
 
 /** A supporting document (§8 decision 10). Integrity Unit only. */
@@ -284,13 +302,6 @@ export type PublicComplaintSubmission = {
   duplicateCheckAcknowledged?: boolean
 }
 
-/** GET /complainant/auth/me and POST /complainant/auth/verify. */
-export type ComplainantSession = {
-  email: string
-  /** Registered name; null when signed in only through a complaint's email. */
-  fullName: string | null
-  sessionExpiresAt: string
-}
 
 /** One step of a complaint's public status timeline (§8 decision 13). */
 export type StatusTimelineEntry = {
@@ -365,6 +376,8 @@ export type StaffAccount = {
   locked: boolean
   /** Expired, or set by ADMIN: the next login must replace it. */
   passwordChangeRequired: boolean
+  /** False only for a self-registration whose emailed code wasn't entered. */
+  emailVerified: boolean
   lastLoginAt: string | null
   passwordChangedAt: string | null
   createdAt: string
@@ -390,7 +403,5 @@ export type SignSlotResult = {
   quorum: QuorumState
 }
 
-/** POST /complainant/auth/request-code — the same message whatever happened. */
-export type OtpRequested = { message: string }
 
 export type HealthStatus = { status: "ok"; uptime: number }

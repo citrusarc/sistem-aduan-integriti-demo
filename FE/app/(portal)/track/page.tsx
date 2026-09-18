@@ -20,9 +20,9 @@ export default function PortalTrackPage() {
           href="/me"
           className="text-primary underline-offset-4 hover:underline"
         >
-          Log masuk dengan e-mel
+          Log masuk atau daftar
         </Link>{" "}
-        untuk melihat semuanya.
+        dengan e-mel yang sama untuk melihat semuanya.
       </p>
     </div>
   )

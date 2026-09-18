@@ -32,6 +32,8 @@ const EVENTS: Case[] = [
     event: { type: "DECISION_RECORDED", outcome: "PENUBUHAN_JKSD" },
   },
   { label: "case closed", event: { type: "CASE_CLOSED" } },
+  { label: "duplicate confirmed", event: { type: "DUPLICATE_CONFIRMED" } },
+  { label: "duplicate undone", event: { type: "DUPLICATE_UNDONE" } },
 ];
 
 /** Expected result per [status][event label]; `null` = refused. */
@@ -47,6 +49,8 @@ const EXPECTED: Record<
     "decision NFA": "NFA",
     "decision PENUBUHAN_JKSD": "DALAM_TINDAKAN",
     "case closed": null,
+    "duplicate confirmed": "PENDUA",
+    "duplicate undone": null,
   },
   MENUNGGU_JMM: {
     "agenda added": null,
@@ -56,6 +60,8 @@ const EXPECTED: Record<
     "decision NFA": "NFA",
     "decision PENUBUHAN_JKSD": "DALAM_TINDAKAN",
     "case closed": null,
+    "duplicate confirmed": null,
+    "duplicate undone": null,
   },
   DALAM_TINDAKAN: {
     "agenda added": "MENUNGGU_JMM",
@@ -65,6 +71,8 @@ const EXPECTED: Record<
     "decision NFA": "NFA",
     "decision PENUBUHAN_JKSD": "DALAM_TINDAKAN",
     "case closed": "SELESAI",
+    "duplicate confirmed": null,
+    "duplicate undone": null,
   },
   SELESAI: {
     "agenda added": null,
@@ -74,6 +82,8 @@ const EXPECTED: Record<
     "decision NFA": null,
     "decision PENUBUHAN_JKSD": null,
     "case closed": null,
+    "duplicate confirmed": null,
+    "duplicate undone": null,
   },
   NFA: {
     "agenda added": "MENUNGGU_JMM",
@@ -83,6 +93,20 @@ const EXPECTED: Record<
     "decision NFA": "NFA",
     "decision PENUBUHAN_JKSD": "DALAM_TINDAKAN",
     "case closed": null,
+    "duplicate confirmed": null,
+    "duplicate undone": null,
+  },
+  // §8 decision 16: nothing moves a repeat but undoing it.
+  PENDUA: {
+    "agenda added": null,
+    "agenda removed, no prior decision": null,
+    "agenda removed, last decision NFA": null,
+    "agenda removed, last decision TINDAKAN_SPRM": null,
+    "decision NFA": null,
+    "decision PENUBUHAN_JKSD": null,
+    "case closed": null,
+    "duplicate confirmed": null,
+    "duplicate undone": "BARU",
   },
 };
 

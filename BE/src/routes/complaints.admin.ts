@@ -1,24 +1,28 @@
 import { Router } from "express";
 import { z } from "zod";
 import { HttpError } from "../middleware/error-handler.js";
-import { requireStaff } from "../middleware/auth.js";
-import { INTEGRITY_UNIT_ROLES } from "../auth/roles.js";
+import { requirePermission } from "../middleware/auth.js";
 import { idSchema } from "../validation/common.js";
 import {
   complaintFiltersSchema,
+  confirmDuplicateSchema,
   createComplaintSchema,
   duplicateCheckSchema,
   updateComplaintSchema,
 } from "../validation/complaints.js";
+import { assessDuplicate } from "../duplicates/assess.js";
 import { createCaseActionSchema } from "../validation/caseActions.js";
 import { createDecisionSchema } from "../validation/jmmDecisions.js";
 import {
   createComplaint,
   closeComplaint,
+  confirmDuplicate,
+  dismissDuplicateSuspicion,
   findDuplicateCandidates,
   getComplaintById,
   listComplaints,
   listStatusHistory,
+  undoDuplicate,
   updateComplaint,
 } from "../db/queries/complaints.js";
 import {
@@ -49,6 +53,7 @@ import {
 import {
   toAdminComplaint,
   toAttachment,
+  toComplaintLink,
   toStatusTimeline,
   toCaseAction,
   toComplainant,
@@ -58,9 +63,10 @@ import {
 } from "../db/mappers.js";
 
 /**
- * INTERNAL console API, gated to INTEGRITY_UNIT_ROLES. KJ and SUB_UNIT staff
- * can log in but are refused here: this is the full case register, including
- * NFA cases (rule 2) and internal notes (rule 9).
+ * INTERNAL console API, gated on complaints.manage (Integrity Unit roles
+ * only). KJ, SUB_UNIT and PENGADU can sign in but are refused here: this is
+ * the full case register, including NFA cases (rule 2) and internal notes
+ * (rule 9).
  *
  * Unlike the public router, these handlers may return the full case file:
  * `ui_remarks`, `psu_action_notes` and decision records are all in scope for
@@ -68,7 +74,7 @@ import {
  */
 export const adminComplaintsRouter: Router = Router();
 
-adminComplaintsRouter.use(requireStaff(...INTEGRITY_UNIT_ROLES));
+adminComplaintsRouter.use(requirePermission("complaints.manage"));
 
 adminComplaintsRouter.get("/", async (req, res) => {
   const parsed = complaintFiltersSchema.safeParse(req.query);
@@ -120,7 +126,18 @@ adminComplaintsRouter.post("/", async (req, res) => {
     }
   }
 
-  const complaint = await createComplaint(parsed.data);
+  // §8 decision 16: a likely repeat is flagged for review, never refused.
+  const complainant = parsed.data.complainant;
+  const suspectedDuplicate = await assessDuplicate({
+    ...parsed.data,
+    contactEmail: complainant?.isAnonymous
+      ? null
+      : (complainant?.contactEmail ?? null),
+  });
+  const complaint = await createComplaint({
+    ...parsed.data,
+    suspectedDuplicate,
+  });
   res.status(201).json({ data: toAdminComplaint(complaint) });
 });
 
@@ -130,16 +147,29 @@ adminComplaintsRouter.get("/:id", async (req, res) => {
   const complaint = await getComplaintById(id);
   if (!complaint) throw new HttpError(404, "Aduan tidak dijumpai");
 
-  const [decisions, caseActions, complainant, attachments, history] =
-    await Promise.all([
-      listDecisionsWithSignatures(id),
-      listCaseActions(id),
-      complaint.complainant_id
-        ? getComplainantById(complaint.complainant_id)
-        : undefined,
-      listAttachments(id),
-      listStatusHistory(id),
-    ]);
+  const [
+    decisions,
+    caseActions,
+    complainant,
+    attachments,
+    history,
+    suspectedOriginal,
+    original,
+  ] = await Promise.all([
+    listDecisionsWithSignatures(id),
+    listCaseActions(id),
+    complaint.complainant_id
+      ? getComplainantById(complaint.complainant_id)
+      : undefined,
+    listAttachments(id),
+    listStatusHistory(id),
+    complaint.suspected_duplicate_of_complaint_id
+      ? getComplaintById(complaint.suspected_duplicate_of_complaint_id)
+      : undefined,
+    complaint.duplicate_of_complaint_id
+      ? getComplaintById(complaint.duplicate_of_complaint_id)
+      : undefined,
+  ]);
 
   res.json({
     data: {
@@ -149,6 +179,15 @@ adminComplaintsRouter.get("/:id", async (req, res) => {
       caseActions: caseActions.map(toCaseAction),
       attachments: attachments.map(toAttachment),
       timeline: toStatusTimeline(history),
+      suspectedDuplicate:
+        suspectedOriginal && complaint.duplicate_score !== null
+          ? {
+              ...toComplaintLink(suspectedOriginal),
+              score: Number(complaint.duplicate_score),
+              reasons: complaint.duplicate_reasons ?? [],
+            }
+          : null,
+      duplicateOf: original ? toComplaintLink(original) : null,
     },
   });
 });
@@ -219,7 +258,7 @@ adminComplaintsRouter.post(
     const stored = await storeFiles(checked);
     let rows;
     try {
-      rows = await addStaffAttachments(id, stored, req.staff!.id);
+      rows = await addStaffAttachments(id, stored, req.user!.id);
     } catch (err) {
       await removeStoredFiles(stored);
       throw err;
@@ -306,6 +345,35 @@ adminComplaintsRouter.post("/:id/decisions", async (req, res) => {
 adminComplaintsRouter.post("/:id/close", async (req, res) => {
   const id = idSchema.parse(req.params.id);
   const complaint = await closeComplaint(id);
+  res.json({ data: toAdminComplaint(complaint) });
+});
+
+/**
+ * §8 decision 16 — staff confirm a repeat: BARU -> PENDUA, pointing at the
+ * original case. Only from BARU (409 otherwise): take it off an agenda first.
+ */
+adminComplaintsRouter.post("/:id/duplicate", async (req, res) => {
+  const id = idSchema.parse(req.params.id);
+  const parsed = confirmDuplicateSchema.safeParse(req.body);
+  if (!parsed.success) {
+    throw new HttpError(422, z.prettifyError(parsed.error));
+  }
+  const complaint = await confirmDuplicate(id, parsed.data.duplicateOfId);
+  res.json({ data: toAdminComplaint(complaint) });
+});
+
+/** Undo: PENDUA -> BARU. */
+adminComplaintsRouter.delete("/:id/duplicate", async (req, res) => {
+  const id = idSchema.parse(req.params.id);
+  const complaint = await undoDuplicate(id);
+  res.json({ data: toAdminComplaint(complaint) });
+});
+
+/** "Bukan pendua": drops the stored suspicion. Moves no status. */
+adminComplaintsRouter.delete("/:id/duplicate-suspicion", async (req, res) => {
+  const id = idSchema.parse(req.params.id);
+  const complaint = await dismissDuplicateSuspicion(id);
+  if (!complaint) throw new HttpError(404, "Aduan tidak dijumpai");
   res.json({ data: toAdminComplaint(complaint) });
 });
 

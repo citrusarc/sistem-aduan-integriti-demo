@@ -56,8 +56,18 @@ export type TestContext = {
   /** A fresh captcha pass token, for /auth/login or /auth/forgot-password. */
   captchaToken(): Promise<string>;
   as(role: StaffRole): Promise<Client>;
-  /** Signs a complainant in through the real OTP flow, reading the emailed code. */
+  /**
+   * A signed-in PENGADU account for `email` (§8 decision 15): registers it
+   * through the real flow (captcha, emailed code) with TEST_PASSWORD, or signs
+   * it in if it already exists.
+   */
   complainant(email: string): Promise<Client>;
+  /** POST /auth/register with a solved captcha. The raw response. */
+  register(input: {
+    email: string;
+    fullName: string;
+    password?: string;
+  }): Promise<Response>;
   /** A client sending exactly this Cookie header. */
   withCookie(cookie: string): Client;
   /** Every message passed to notifyByEmail() since the context started. */
@@ -168,6 +178,19 @@ export async function startTestContext(): Promise<TestContext> {
     return body.data.captchaToken;
   }
 
+  async function register(input: {
+    email: string;
+    fullName: string;
+    password?: string;
+  }): Promise<Response> {
+    return post("/auth/register", {
+      email: input.email,
+      fullName: input.fullName,
+      password: input.password ?? TEST_PASSWORD,
+      captchaToken: await captchaToken(),
+    });
+  }
+
   async function staffLogin(
     email: string,
     password: string,
@@ -227,29 +250,38 @@ export async function startTestContext(): Promise<TestContext> {
     withCookie: clientFor,
     emails,
     fetch: (path, init) => fetch(`${base}${path}`, init),
+    register,
     async complainant(email) {
       const before = emails.length;
-      const requested = await fetch(`${base}/complainant/auth/request-code`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email }),
+      const registered = await register({
+        email,
+        fullName: `Pengadu ${email}`,
       });
-      if (requested.status !== 202) {
-        throw new Error(`Minta kod gagal: ${requested.status}`);
+      if (registered.status !== 202) {
+        throw new Error(`Pendaftaran gagal: ${registered.status}`);
       }
-      const message = emails
+      const { data } = (await registered.json()) as {
+        data: { verifyToken: string };
+      };
+      const code = emails
         .slice(before)
-        .find((m) => m.to === email.toLowerCase());
-      const code = message?.text.match(/\b(\d{6})\b/)?.[1];
-      if (!code) throw new Error(`Tiada kod dihantar kepada ${email}`);
-
-      const verified = await fetch(`${base}/complainant/auth/verify`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email, code }),
+        .filter((m) => m.to === email.toLowerCase())
+        .at(-1)
+        ?.text.match(/\b(\d{6})\b/)?.[1];
+      if (!code) {
+        // Already registered: no code, just a notice. Sign in instead.
+        const login = await staffLogin(email, TEST_PASSWORD);
+        if (!login.client) {
+          throw new Error(`Log masuk ${email} gagal: ${login.status}`);
+        }
+        return login.client;
+      }
+      const verified = await post("/auth/register/verify", {
+        verifyToken: data.verifyToken,
+        code,
       });
       if (verified.status !== 200) {
-        throw new Error(`Pengesahan kod gagal: ${verified.status}`);
+        throw new Error(`Pengesahan pendaftaran gagal: ${verified.status}`);
       }
       return clientFor(cookieFrom(verified));
     },

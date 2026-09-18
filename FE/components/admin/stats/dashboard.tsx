@@ -34,6 +34,7 @@ const STATUS_ACCENT: Record<ComplaintStatus, string> = {
   DALAM_TINDAKAN: "bg-status-dalam-tindakan-foreground",
   SELESAI: "bg-status-selesai-foreground",
   NFA: "bg-status-nfa-foreground",
+  PENDUA: "bg-status-pendua-foreground",
 }
 
 /**

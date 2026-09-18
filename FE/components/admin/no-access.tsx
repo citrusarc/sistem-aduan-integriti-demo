@@ -4,7 +4,7 @@ import Link from "next/link"
 import { useRouter, useSearchParams } from "next/navigation"
 import { ShieldOffIcon } from "lucide-react"
 
-import { useStaffSession } from "@/components/providers/staff-session"
+import { useSession } from "@/components/providers/session"
 import { Button, buttonVariants } from "@/components/ui/button"
 import { LoadingState } from "@/components/ui/states"
 import { homeFor, safeNextPath } from "@/lib/access"
@@ -16,7 +16,7 @@ import { STAFF_ROLE } from "@/types/enums"
  * someone else.
  */
 export function NoAccess() {
-  const session = useStaffSession()
+  const session = useSession()
   const router = useRouter()
   const from = safeNextPath(useSearchParams().get("dari"))
 
@@ -24,7 +24,7 @@ export function NoAccess() {
     return <LoadingState label="Menyemak sesi…" />
   }
 
-  const staff = session.status === "authenticated" ? session.staff : null
+  const staff = session.status === "authenticated" ? session.user : null
 
   async function switchAccount() {
     await session.logout()
@@ -61,7 +61,7 @@ export function NoAccess() {
       <div className="flex flex-wrap justify-center gap-2">
         {staff ? (
           <>
-            <Link href={homeFor(staff.role)} className={buttonVariants()}>
+            <Link href={homeFor(staff)} className={buttonVariants()}>
               Ke halaman utama saya
             </Link>
             <Button variant="outline" onClick={switchAccount}>

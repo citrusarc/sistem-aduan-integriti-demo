@@ -2,12 +2,12 @@
 
 import Link from "next/link"
 
-import { RequireComplainant } from "@/components/portal/complainant-login"
+import { RequireSignedIn } from "@/components/portal/require-signed-in"
 import {
   PROTECTION_STATUS_TEXT,
   PUBLIC_STATUS_MEANING,
 } from "@/components/portal/public-status"
-import { useComplainantSession } from "@/components/providers/complainant-session"
+import { useSession } from "@/components/providers/session"
 import { BackLink } from "@/components/ui/back-link"
 import { Badge } from "@/components/ui/badge"
 import { buttonVariants } from "@/components/ui/button"
@@ -41,9 +41,9 @@ export function MyComplaintDetailPage({ refNo }: { refNo: string | null }) {
   return (
     <div className="mx-auto flex w-full max-w-3xl flex-col gap-6">
       <BackLink href="/me">Aduan saya</BackLink>
-      <RequireComplainant>
+      <RequireSignedIn>
         {refNo ? <Detail refNo={refNo} /> : <NotFound />}
-      </RequireComplainant>
+      </RequireSignedIn>
     </div>
   )
 }
@@ -54,8 +54,8 @@ export function MyComplaintDetailPage({ refNo }: { refNo: string | null }) {
  * NFA — with the same 404, and this page shows that the same way.
  */
 function Detail({ refNo }: { refNo: string }) {
-  const session = useComplainantSession()
-  const email = session.status === "authenticated" ? session.session.email : ""
+  const session = useSession()
+  const email = session.status === "authenticated" ? session.user.email : ""
   const complaint = useApiData(`me:complaint:${email}:${refNo}`, () =>
     complainantApi.complaint(refNo)
   )

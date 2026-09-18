@@ -1,8 +1,7 @@
 import { Router } from "express";
 import { z } from "zod";
 import { HttpError } from "../middleware/error-handler.js";
-import { requireStaff } from "../middleware/auth.js";
-import { INTEGRITY_UNIT_ROLES } from "../auth/roles.js";
+import { requirePermission } from "../middleware/auth.js";
 import { idSchema } from "../validation/common.js";
 import {
   addAgendaItemSchema,
@@ -39,7 +38,7 @@ import {
  *   DELETE /:id/items/:complaintId MENUNGGU_JMM -> BARU / previous outcome
  */
 export const adminMeetingsRouter: Router = Router();
-adminMeetingsRouter.use(requireStaff(...INTEGRITY_UNIT_ROLES));
+adminMeetingsRouter.use(requirePermission("jmm.manage"));
 
 /** Full meeting detail: the meeting, its agenda in order, decisions made at it. */
 async function meetingDetail(id: string) {

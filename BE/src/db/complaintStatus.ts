@@ -16,6 +16,8 @@ import type { ComplaintStatus, JmmOutcome } from "../types/enums.js";
  *   DECISION_RECORDED     BARU, MENUNGGU_JMM, DALAM_TINDAKAN, NFA -> DALAM_TINDAKAN
  *                                                                    (NFA if outcome = NFA)
  *   CASE_CLOSED           DALAM_TINDAKAN                          -> SELESAI
+ *   DUPLICATE_CONFIRMED   BARU                                    -> PENDUA
+ *   DUPLICATE_UNDONE      PENDUA                                  -> BARU
  *
  * SELESAI is terminal: nothing moves a closed case. Re-tabling a decided case
  * (DALAM_TINDAKAN / NFA) is allowed, because a case can go back to JMM and a
@@ -26,6 +28,11 @@ import type { ComplaintStatus, JmmOutcome } from "../types/enums.js";
  * reverts it, and a meeting cannot be closed while an item has no decision.
  * So AGENDA_ADDED from MENUNGGU_JMM is refused — the complaint is already
  * queued (the database trigger from migration 004 refuses it too).
+ *
+ * PENDUA (§8 decision 16) is staff confirming a new complaint repeats an
+ * existing case. Only a BARU complaint can be: one on an agenda is taken off it
+ * first, and a decided one has a JMM record of its own. PENDUA is never tabled
+ * or decided; staff can undo it, which puts the complaint back to BARU.
  */
 
 export type StatusEvent =
@@ -36,13 +43,17 @@ export type StatusEvent =
       lastOutcome: JmmOutcome | null;
     }
   | { type: "DECISION_RECORDED"; outcome: JmmOutcome }
-  | { type: "CASE_CLOSED" };
+  | { type: "CASE_CLOSED" }
+  | { type: "DUPLICATE_CONFIRMED" }
+  | { type: "DUPLICATE_UNDONE" };
 
 const ALLOWED_FROM: Record<StatusEvent["type"], readonly ComplaintStatus[]> = {
   AGENDA_ADDED: ["BARU", "DALAM_TINDAKAN", "NFA"],
   AGENDA_REMOVED: ["MENUNGGU_JMM"],
   DECISION_RECORDED: ["BARU", "MENUNGGU_JMM", "DALAM_TINDAKAN", "NFA"],
   CASE_CLOSED: ["DALAM_TINDAKAN"],
+  DUPLICATE_CONFIRMED: ["BARU"],
+  DUPLICATE_UNDONE: ["PENDUA"],
 };
 
 const ACTION_LABEL: Record<StatusEvent["type"], string> = {
@@ -50,6 +61,8 @@ const ACTION_LABEL: Record<StatusEvent["type"], string> = {
   AGENDA_REMOVED: "dikeluarkan dari agenda JMM",
   DECISION_RECORDED: "direkodkan keputusan JMM",
   CASE_CLOSED: "ditutup sebagai Selesai",
+  DUPLICATE_CONFIRMED: "ditandakan sebagai Pendua",
+  DUPLICATE_UNDONE: "dinyahtanda daripada Pendua",
 };
 
 // Status names as the UI shows them, so refusals read naturally.
@@ -59,6 +72,7 @@ const STATUS_LABEL: Record<ComplaintStatus, string> = {
   DALAM_TINDAKAN: "Dalam Tindakan",
   SELESAI: "Selesai",
   NFA: "NFA",
+  PENDUA: "Pendua",
 };
 
 export type TransitionResult =
@@ -89,5 +103,9 @@ export function transition(
       return { ok: true, to: outcomeStatus(event.outcome) };
     case "CASE_CLOSED":
       return { ok: true, to: "SELESAI" };
+    case "DUPLICATE_CONFIRMED":
+      return { ok: true, to: "PENDUA" };
+    case "DUPLICATE_UNDONE":
+      return { ok: true, to: "BARU" };
   }
 }

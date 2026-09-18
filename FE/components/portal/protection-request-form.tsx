@@ -6,8 +6,8 @@ import { useSearchParams } from "next/navigation"
 import { CheckCircle2Icon } from "lucide-react"
 
 import { latestRequestByRef } from "@/components/portal/my-complaints"
-import { RequireComplainant } from "@/components/portal/complainant-login"
-import { useComplainantSession } from "@/components/providers/complainant-session"
+import { RequireSignedIn } from "@/components/portal/require-signed-in"
+import { useSession } from "@/components/providers/session"
 import { Button, buttonVariants } from "@/components/ui/button"
 import { FieldControl, FormField } from "@/components/ui/field"
 import { Textarea } from "@/components/ui/input"
@@ -25,9 +25,9 @@ const MAX_REASON = 5000
 
 export function ProtectionRequestPage() {
   return (
-    <RequireComplainant intro="Permohonan perlindungan dibuat untuk aduan anda sendiri. Log masuk dengan e-mel yang digunakan semasa membuat aduan.">
+    <RequireSignedIn intro="Permohonan perlindungan dibuat untuk aduan anda sendiri. Log masuk dengan akaun yang menggunakan e-mel semasa membuat aduan.">
       <ProtectionRequestForm />
-    </RequireComplainant>
+    </RequireSignedIn>
   )
 }
 
@@ -37,8 +37,8 @@ export function ProtectionRequestPage() {
  * checks ownership again (404) and refuses a second pending request (409).
  */
 function ProtectionRequestForm() {
-  const session = useComplainantSession()
-  const email = session.status === "authenticated" ? session.session.email : ""
+  const session = useSession()
+  const email = session.status === "authenticated" ? session.user.email : ""
   const preselect = slugToRef(useSearchParams().get("aduan") ?? "")
   const complaints = useApiData(`me:complaints:${email}`, () =>
     complainantApi.complaints()

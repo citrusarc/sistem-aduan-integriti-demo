@@ -97,8 +97,22 @@ export function toAdminComplaint(row: ComplaintRow) {
     receivedVia: row.received_via,
     status: row.status,
     statusChangedAt: row.status_changed_at,
+    /** §8 decision 16. Details (ref no, reasons) come with the case file. */
+    suspectedDuplicateOfId: row.suspected_duplicate_of_complaint_id,
+    duplicateScore:
+      row.duplicate_score === null ? null : Number(row.duplicate_score),
+    duplicateOfId: row.duplicate_of_complaint_id,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
+  };
+}
+
+/** Another complaint named on a case file (the original of a repeat). Internal. */
+export function toComplaintLink(row: ComplaintRow) {
+  return {
+    id: row.id,
+    complaintRefNo: row.complaint_ref_no,
+    status: row.status,
   };
 }
 
@@ -342,6 +356,8 @@ export function toStaffAccount(row: StaffAccountRow) {
     locked: row.locked,
     /** §8 decision 14: the next login must set a new password. */
     passwordChangeRequired: row.must_change_password || row.password_expired,
+    /** §8 decision 15: false only for a self-registration not yet confirmed. */
+    emailVerified: row.email_verified,
     lastLoginAt: row.last_login_at,
     passwordChangedAt: row.password_changed_at,
     createdAt: row.created_at,

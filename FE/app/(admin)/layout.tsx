@@ -1,7 +1,5 @@
 import type { Metadata } from "next"
 
-import { StaffSessionProvider } from "@/components/providers/staff-session"
-
 export const metadata: Metadata = {
   title: { default: "Konsol", template: "%s · Konsol Unit Integriti" },
   // Internal console: keep it out of search indexes.
@@ -9,14 +7,14 @@ export const metadata: Metadata = {
 }
 
 /**
- * Everything staff-facing shares one session provider. The gate itself is in
- * `(console)/layout.tsx`, so `/login` and `/tiada-akses` sit inside this group
- * without being gated.
+ * The console group. The gate itself is in `(console)/layout.tsx`, so
+ * `/tiada-akses` sits inside this group without being gated. Sign-in pages
+ * are in `(auth)`; the session provider is at the root.
  */
 export default function AdminGroupLayout({
   children,
 }: {
   children: React.ReactNode
 }) {
-  return <StaffSessionProvider>{children}</StaffSessionProvider>
+  return children
 }

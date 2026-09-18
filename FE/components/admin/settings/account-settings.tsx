@@ -4,7 +4,7 @@ import * as React from "react"
 import Link from "next/link"
 import { UsersIcon } from "lucide-react"
 
-import { useStaffSession } from "@/components/providers/staff-session"
+import { useSession } from "@/components/providers/session"
 import { Button } from "@/components/ui/button"
 import { FormField } from "@/components/ui/field"
 import { PageHeader } from "@/components/ui/page-header"
@@ -19,8 +19,8 @@ import { errorMessage } from "@/lib/errors"
 import { STAFF_ROLE } from "@/types/enums"
 
 export function AccountSettings() {
-  const session = useStaffSession()
-  const staff = session.status === "authenticated" ? session.staff : null
+  const session = useSession()
+  const staff = session.status === "authenticated" ? session.user : null
 
   return (
     <div className="flex flex-col gap-6">

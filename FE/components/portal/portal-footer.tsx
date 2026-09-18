@@ -47,7 +47,7 @@ export function PortalFooter() {
             href="/login"
             className="mt-2 text-primary-foreground/75 hover:underline"
           >
-            Log masuk kakitangan
+            Log masuk (pengadu &amp; kakitangan)
           </Link>
         </div>
       </div>

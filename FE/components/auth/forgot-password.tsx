@@ -3,7 +3,7 @@
 import * as React from "react"
 import Link from "next/link"
 
-import { SliderCaptcha } from "@/components/admin/slider-captcha"
+import { SliderCaptcha } from "@/components/auth/slider-captcha"
 import { Button, buttonVariants } from "@/components/ui/button"
 import { FormField } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
@@ -90,7 +90,7 @@ export function ForgotPassword() {
       <p className="text-sm text-muted-foreground">
         {step === "done"
           ? "Kata laluan anda telah ditetapkan semula."
-          : "Tetapkan kata laluan baharu dengan kod yang dihantar ke e-mel akaun kakitangan anda."}
+          : "Tetapkan kata laluan baharu dengan kod yang dihantar ke e-mel akaun anda."}
       </p>
     </div>
   )
@@ -188,7 +188,7 @@ export function ForgotPassword() {
         noValidate
         className="flex flex-col gap-4"
       >
-        <FormField label="E-mel akaun kakitangan" required>
+        <FormField label="E-mel akaun" required>
           <Input
             type="email"
             autoComplete="username"

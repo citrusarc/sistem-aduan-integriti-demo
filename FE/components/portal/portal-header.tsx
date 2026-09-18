@@ -5,9 +5,10 @@ import Link from "next/link"
 import { usePathname } from "next/navigation"
 import { LogOutIcon, MenuIcon, ShieldCheckIcon, XIcon } from "lucide-react"
 
-import { useComplainantSession } from "@/components/providers/complainant-session"
+import { useSession } from "@/components/providers/session"
 import { Button, buttonVariants } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/states"
+import { homeFor } from "@/lib/access"
 import { cn } from "@/lib/utils"
 
 const LINKS = [
@@ -113,11 +114,11 @@ export function PortalHeader() {
 }
 
 /**
- * The complainant's own session (aduan_csid). Staff being signed in to the
- * console has no effect here.
+ * The one session (§8 decision 15). Anyone signed in gets "Aduan saya"; an
+ * account with a console also gets a way back to it.
  */
 function ComplainantMenu() {
-  const session = useComplainantSession()
+  const session = useSession()
 
   if (session.status === "loading") {
     return <Skeleton className="h-8 w-32" aria-label="Menyemak sesi" />
@@ -125,27 +126,44 @@ function ComplainantMenu() {
 
   if (session.status !== "authenticated") {
     return (
-      <Link href="/me" className={buttonVariants({ variant: "outline-cta" })}>
-        Log masuk / Daftar
-      </Link>
+      <div className="flex items-center gap-2">
+        <Link href="/login" className={buttonVariants({ variant: "ghost" })}>
+          Log masuk
+        </Link>
+        <Link
+          href="/daftar"
+          className={buttonVariants({ variant: "outline-cta" })}
+        >
+          Daftar
+        </Link>
+      </div>
     )
   }
 
+  const { user } = session
   return (
     <div className="flex items-center gap-2">
+      {user.hasConsole && (
+        <Link
+          href={homeFor(user)}
+          className={buttonVariants({ variant: "outline" })}
+        >
+          Konsol
+        </Link>
+      )}
       <Link href="/me" className={buttonVariants({ variant: "secondary" })}>
         Aduan saya
       </Link>
       <span
         className="hidden max-w-40 truncate text-xs text-muted-foreground lg:inline"
-        title={session.session.email}
+        title={user.email}
       >
-        {session.session.email}
+        {user.email}
       </span>
       <Button
         variant="ghost"
         size="icon"
-        aria-label="Log keluar pengadu"
+        aria-label="Log keluar"
         title="Log keluar"
         onClick={() => void session.logout()}
       >

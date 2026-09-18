@@ -27,15 +27,16 @@ apiRouter.get("/health", async (_req, res) => {
  *   /api/complaints  — public portal. Business rule 9 applies: no internal
  *                      notes, no decision records, ever.
  *   /api/admin/*     — Integrity Unit console. Every router here is gated on
- *                      INTEGRITY_UNIT_ROLES, not merely "logged in" — KJ and
- *                      SUB_UNIT staff are authenticated but get 403.
+ *                      a permission only Integrity Unit roles hold (see
+ *                      auth/permissions.ts), not merely "signed in" — KJ,
+ *                      SUB_UNIT and PENGADU are authenticated but get 403.
  *
  * Do not mount an admin handler under /api/complaints, however convenient the
  * URL looks.
  */
 apiRouter.use("/auth", authRouter);
 apiRouter.use("/complaints", publicComplaintsRouter);
-// Signed-in complainants (email OTP). Public-safe shapes only, like /complaints.
+// A signed-in account's own complaints. Public-safe shapes only, like /complaints.
 apiRouter.use("/complainant", complainantRouter);
 // KJ / SUB_UNIT only — outside /api/admin on purpose; those roles stay refused there.
 apiRouter.use("/referrals", referralsRouter);

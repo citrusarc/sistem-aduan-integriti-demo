@@ -11,6 +11,8 @@ export const PUBLIC_STATUS_MEANING: Partial<Record<ComplaintStatus, string>> = {
   DALAM_TINDAKAN:
     "Keputusan telah dibuat dan tindakan susulan sedang dijalankan.",
   SELESAI: "Tindakan ke atas aduan ini telah selesai.",
+  PENDUA:
+    "Aduan ini mengenai perkara yang sama dengan aduan lain yang telah diterima, dan diproses bersama aduan tersebut.",
 }
 
 /** Complainant-facing wording; review notes are never shown (rule 9). */

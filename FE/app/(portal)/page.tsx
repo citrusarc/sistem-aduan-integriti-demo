@@ -18,7 +18,7 @@ const POINTS = [
   {
     icon: MailIcon,
     title: "Makluman melalui e-mel",
-    body: "Pengesahan dan kod log masuk dihantar ke e-mel anda — tidak sekali-kali melalui SMS.",
+    body: "Pengesahan dan kod pengesahan log masuk dihantar ke e-mel anda — tidak sekali-kali melalui SMS.",
   },
 ]
 

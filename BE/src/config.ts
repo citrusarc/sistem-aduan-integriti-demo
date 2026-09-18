@@ -66,24 +66,27 @@ export const config = {
   },
 
   /**
-   * Complainant login by email OTP — CLAUDE.md §8 decision 4. The code shape,
-   * expiry, and attempt limit are the decision itself, so they are constants,
-   * not environment settings (and the attempt limit is also a DB check).
+   * §8 decision 15: the address that becomes the first ADMIN when it proves
+   * itself (registration or login code) while no active ADMIN exists. Unset:
+   * the first ADMIN comes from `npm run staff -- create`.
    */
-  complainantAuth: {
-    cookieName: "aduan_csid",
-    otpDigits: 6,
-    otpTtlMinutes: 10,
-    otpMaxAttempts: 5,
-    /** Minimum gap between codes sent to one address. */
-    otpCooldownSeconds: Number(process.env.OTP_COOLDOWN_SECONDS ?? 60),
-    /** Codes sent to one address per rolling hour. */
-    otpMaxPerHour: Number(process.env.OTP_MAX_PER_HOUR ?? 5),
-    sessionTtlMinutes: Number(
-      process.env.COMPLAINANT_SESSION_TTL_MINUTES ?? 120,
+  initialAdminEmail: process.env.INITIAL_ADMIN_EMAIL?.trim().toLowerCase() || null,
+
+  /** §8 decision 16 — keeping portal submissions from being used to spam. */
+  portal: {
+    /**
+     * Portal submissions per client IP per rolling hour; 0 turns it off. Kept
+     * in memory only — an anonymous complainant's IP is never stored.
+     */
+    submissionsPerIpPerHour: Number(
+      process.env.PORTAL_SUBMISSIONS_PER_IP_PER_HOUR ?? 10,
     ),
-    idleTimeoutMinutes: Number(
-      process.env.COMPLAINANT_SESSION_IDLE_MINUTES ?? 30,
+    /**
+     * Acknowledgement emails one address receives per rolling 24 hours. The
+     * complaint is still registered beyond this; it just isn't emailed about.
+     */
+    ackEmailsPerAddressPerDay: Number(
+      process.env.PORTAL_ACK_EMAILS_PER_DAY ?? 3,
     ),
   },
 };

@@ -9,6 +9,7 @@ import { cn } from "@/lib/utils"
  *   Dalam Tindakan  muted gold         active, not alarming
  *   Selesai         muted green        calm resolution
  *   NFA             cool grey-blue     closed, deliberately NOT "success"
+ *   Pendua          dusty violet       folded into another case, not rejected
  *
  * NFA is not a failure state and Selesai is not a win — an integrity complaint
  * closed with no further action is a legitimate outcome, so neither gets
@@ -21,6 +22,7 @@ const STATUS_CLASSES: Record<ComplaintStatus, string> = {
     "bg-status-dalam-tindakan text-status-dalam-tindakan-foreground",
   SELESAI: "bg-status-selesai text-status-selesai-foreground",
   NFA: "bg-status-nfa text-status-nfa-foreground",
+  PENDUA: "bg-status-pendua text-status-pendua-foreground",
 }
 
 export type StatusPillProps = {

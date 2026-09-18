@@ -111,6 +111,13 @@ export type ComplaintRow = {
   status_changed_at: Date;
   /** Migration 006. Set by portal submissions; NULL for staff-registered rows. */
   disclaimer_acknowledged_at: Date | null;
+  /** Migration 018 (§8 decision 16): set at registration, cleared by staff. */
+  suspected_duplicate_of_complaint_id: string | null;
+  /** NUMERIC comes back from pg as a string. */
+  duplicate_score: string | null;
+  duplicate_reasons: string[] | null;
+  /** Set exactly while status is PENDUA. */
+  duplicate_of_complaint_id: string | null;
   created_at: Date;
   updated_at: Date;
 };

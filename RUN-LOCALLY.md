@@ -58,17 +58,17 @@ npm run dev                    # http://localhost:3000
 
 ## 4. Sign in
 
-**Staff console** — http://localhost:3000/login
+One sign-in page for everybody — staff and complainants (§8 decision 15). Before the first run, apply the migrations: `npm run db:migrate` in `BE/`.
 
-On an empty database the page shows **Persediaan awal**: create the first ADMIN (name, email, and a password of at least 12 characters with upper case, lower case, a number and a special character). You're signed in straight away.
+**First ADMIN** — `INITIAL_ADMIN_EMAIL` in `BE/.env` (`badrul@badrulhanif.com`).
 
-Every later sign-in: email + password → slide the captcha piece into the gap → enter the 6-digit code printed in the **API terminal** (MFA). Accounts ADMIN creates, and passwords ADMIN resets, must set their own new password at that first login; any password older than the expiry period (180 days by default, set under Tetapan › Pengurusan staf › Dasar kata laluan) must be changed too. Five wrong passwords block an account: ADMIN clicks **Buka sekatan**, or the owner uses **Lupa kata laluan?** on the login page (code in the API terminal). That ADMIN creates every other account — KUI, PI, KJ, SUB_UNIT and so on — under Tetapan › Pengurusan staf. Setup closes for good once any staff account exists.
+1. Open http://localhost:3000/daftar and register that address: name, email, and a password of at least 12 characters with upper case, lower case, a number and a special character. Slide the captcha piece into the gap.
+2. Enter the 6-digit code printed in the **API terminal** (`npm run dev` in `BE/`). No email is actually sent — every message is printed there.
+3. While no active ADMIN exists, that account becomes **ADMIN** and lands on the console.
 
-**Complainant portal** — http://localhost:3000/me
+**Everyone else** registers the same way at `/daftar` and starts as **Pengadu** (portal only: `/me`). ADMIN turns staff into staff under Tetapan › Pengurusan akaun › **Pengadu** tab › Peranan (KUI, PI, KJ, SUB_UNIT…), or creates an account there directly.
 
-1. **Daftar**: enter your name and email, then find the 6-digit code in the **API terminal** (`npm run dev` in `BE/`) and enter it. You're registered and signed in.
-2. **Log masuk** later: enter the email, then the code from the API terminal. No email is actually sent — every message is printed there.
-3. A code is valid for 10 minutes. A new one can be requested after 60 seconds (5 per hour).
+**Signing in** — http://localhost:3000/login: email + password → captcha → the 6-digit code from the API terminal (MFA). A Pengadu goes to `/me`; staff to their console. Passwords ADMIN sets must be replaced at first login; any password older than the expiry period (180 days by default, Tetapan › Pengurusan akaun › Dasar kata laluan) must be changed too. Five wrong passwords block an account: ADMIN clicks **Buka sekatan**, or the owner uses **Lupa kata laluan?** (code in the API terminal).
 
 Anyone can also submit at `/submit` and track by reference number at `/track` without signing in.
 

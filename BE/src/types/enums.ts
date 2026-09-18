@@ -144,14 +144,16 @@ export const STAFF_ROLE = [
   "ADMIN",
   "KJ",
   "SUB_UNIT",
+  // db/migrations/016 — a registered complainant (§8 decision 15). Not staff
+  // despite the enum's name: it holds no console permission.
+  "PENGADU",
 ] as const;
 export type StaffRole = (typeof STAFF_ROLE)[number];
 
 /**
  * complaint_status_enum — stored on `complaints.status` since
  * db/migrations/005, written by the API on each transition (CLAUDE.md §8
- * decision 1). Until the API switches over, responses still use the read-time
- * derivation in `src/db/complaintStatus.ts`.
+ * decision 1). PENDUA from db/migrations/016 (§8 decision 16).
  */
 export const COMPLAINT_STATUS = [
   "BARU",
@@ -159,6 +161,7 @@ export const COMPLAINT_STATUS = [
   "DALAM_TINDAKAN",
   "SELESAI",
   "NFA",
+  "PENDUA",
 ] as const;
 export type ComplaintStatus = (typeof COMPLAINT_STATUS)[number];
 

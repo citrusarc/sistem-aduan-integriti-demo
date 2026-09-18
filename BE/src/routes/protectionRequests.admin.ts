@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { z } from "zod";
 import { HttpError } from "../middleware/error-handler.js";
-import { requireStaff } from "../middleware/auth.js";
+import { requirePermission } from "../middleware/auth.js";
 import { idSchema } from "../validation/common.js";
 import {
   protectionRequestFiltersSchema,
@@ -20,7 +20,7 @@ import { toAdminProtectionRequest } from "../db/mappers.js";
  * ADMIN included, get 403.
  */
 export const adminProtectionRequestsRouter: Router = Router();
-adminProtectionRequestsRouter.use(requireStaff("KUI"));
+adminProtectionRequestsRouter.use(requirePermission("protection.review"));
 
 adminProtectionRequestsRouter.get("/", async (req, res) => {
   const parsed = protectionRequestFiltersSchema.safeParse(req.query);
@@ -51,7 +51,7 @@ adminProtectionRequestsRouter.post("/:id/review", async (req, res) => {
     id,
     status: parsed.data.status,
     reviewNotes: parsed.data.reviewNotes ?? null,
-    reviewerId: req.staff!.id,
+    reviewerId: req.user!.id,
   });
 
   const row = await getProtectionRequest(id);

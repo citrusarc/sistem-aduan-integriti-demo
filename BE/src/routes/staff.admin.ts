@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { z } from "zod";
 import { HttpError } from "../middleware/error-handler.js";
-import { requireStaff } from "../middleware/auth.js";
+import { requirePermission } from "../middleware/auth.js";
 import { checkPasswordPolicy, hashPassword } from "../auth/password.js";
 import {
   createStaffAccount,
@@ -31,7 +31,7 @@ import { toStaffAccount } from "../db/mappers.js";
  * Staff change their OWN password at POST /api/auth/password, not here.
  */
 export const adminStaffRouter: Router = Router();
-adminStaffRouter.use(requireStaff("ADMIN"));
+adminStaffRouter.use(requirePermission("users.manage"));
 
 async function accountOr404(id: string) {
   const account = await getStaffAccount(id);
@@ -93,7 +93,7 @@ adminStaffRouter.post("/:id/password", async (req, res) => {
   if (policyError) throw new HttpError(422, policyError);
 
   await accountOr404(id);
-  const own = id === req.staff!.id;
+  const own = id === req.user!.id;
   await setPassword(
     id,
     await hashPassword(parsed.data.password),
@@ -129,7 +129,7 @@ adminStaffRouter.post("/:id/activate", async (req, res) => {
  * period applies from each account's next login.
  */
 export const adminSettingsRouter: Router = Router();
-adminSettingsRouter.use(requireStaff("ADMIN"));
+adminSettingsRouter.use(requirePermission("security.manage"));
 
 function toSecuritySettings(row: SecuritySettingsRow) {
   return {
@@ -159,10 +159,10 @@ adminSettingsRouter.put("/security", async (req, res) => {
   }
   const row = await updateSecuritySettings(
     parsed.data.passwordMaxAgeDays,
-    req.staff!.id,
+    req.user!.id,
   );
   console.log(
-    `[Tetapan] Tempoh luput kata laluan: ${row.password_max_age_days} hari (oleh ${req.staff!.email})`,
+    `[Tetapan] Tempoh luput kata laluan: ${row.password_max_age_days} hari (oleh ${req.user!.email})`,
   );
   res.json({ data: toSecuritySettings(row) });
 });

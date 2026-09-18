@@ -7,8 +7,8 @@ import {
   PROTECTION_STATUS_TEXT,
   PUBLIC_STATUS_MEANING,
 } from "@/components/portal/public-status"
-import { RequireComplainant } from "@/components/portal/complainant-login"
-import { useComplainantSession } from "@/components/providers/complainant-session"
+import { RequireSignedIn } from "@/components/portal/require-signed-in"
+import { useSession } from "@/components/providers/session"
 import { Badge } from "@/components/ui/badge"
 import { Button, buttonVariants } from "@/components/ui/button"
 import { DateDisplay } from "@/components/ui/date-display"
@@ -28,9 +28,9 @@ export function MyComplaintsPage() {
         title="Aduan Saya"
         description="Status aduan yang dikaitkan dengan e-mel anda."
       />
-      <RequireComplainant>
+      <RequireSignedIn>
         <MyComplaints />
-      </RequireComplainant>
+      </RequireSignedIn>
     </div>
   )
 }
@@ -50,8 +50,8 @@ export function latestRequestByRef(requests: ComplainantProtectionRequest[]) {
  * only disclosable ones (rule 2) — BE decides both; this lists what it returns.
  */
 function MyComplaints() {
-  const session = useComplainantSession()
-  const email = session.status === "authenticated" ? session.session.email : ""
+  const session = useSession()
+  const email = session.status === "authenticated" ? session.user.email : ""
   const complaints = useApiData(`me:complaints:${email}`, () =>
     complainantApi.complaints()
   )

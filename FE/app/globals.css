@@ -53,6 +53,8 @@
   --color-status-selesai-foreground: var(--status-selesai-foreground);
   --color-status-nfa: var(--status-nfa);
   --color-status-nfa-foreground: var(--status-nfa-foreground);
+  --color-status-pendua: var(--status-pendua);
+  --color-status-pendua-foreground: var(--status-pendua-foreground);
   --radius-sm: calc(var(--radius) * 0.6);
   --radius-md: calc(var(--radius) * 0.8);
   --radius-lg: var(--radius);
@@ -117,6 +119,8 @@
   --status-selesai-foreground: oklch(0.479 0.078 161.1);
   --status-nfa: oklch(0.923 0.004 236.5);
   --status-nfa-foreground: oklch(0.444 0.023 248.3);
+  --status-pendua: oklch(0.925 0.02 305);
+  --status-pendua-foreground: oklch(0.46 0.06 305);
 
   /* Cards: a hairline plus a soft, navy-tinted lift instead of a hard border. */
   --card-shadow:
@@ -175,6 +179,8 @@
   --status-selesai-foreground: oklch(0.81 0.07 158);
   --status-nfa: oklch(0.315 0.008 236.5);
   --status-nfa-foreground: oklch(0.79 0.02 248.3);
+  --status-pendua: oklch(0.32 0.03 305);
+  --status-pendua-foreground: oklch(0.82 0.05 305);
 
   /* Shadows barely read on a dark ground, so a faint top highlight does the lifting. */
   --card-shadow:

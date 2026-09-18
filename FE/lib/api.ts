@@ -5,7 +5,6 @@ import type {
   CaseAction,
   ComplaintAttachment,
   ComplainantProtectionRequest,
-  ComplainantSession,
   ComplaintStats,
   DecisionLogEntry,
   DecisionSignatureState,
@@ -13,7 +12,6 @@ import type {
   JmmDecision,
   JmmMeetingDetail,
   JmmMeetingListEntry,
-  OtpRequested,
   PublicComplaint,
   PublicComplaintDetail,
   PublicComplaintSubmission,
@@ -48,9 +46,9 @@ import type {
 
 /**
  * Browser-side client for BE. Every call sends cookies (`credentials:
- * "include"`): staff auth is `aduan_sid`, complainant auth is `aduan_csid`,
- * both httpOnly and scoped to BE's `/api` path — so Next's own server never
- * sees them, and all authenticated calls happen in the browser.
+ * "include"`): the one session cookie `aduan_sid` (§8 decision 15), httpOnly
+ * and scoped to BE's `/api` path — so Next's own server never sees it, and all
+ * authenticated calls happen in the browser.
  *
  * Nothing here decides access. BE enforces every rule; this only calls it.
  */
@@ -88,28 +86,21 @@ export class NetworkError extends Error {
   }
 }
 
-export type SessionScope = "staff" | "complainant"
-
 /**
- * Dispatched on `window` when a signed-in call comes back 401, so the matching
- * session provider can drop its state and send the user to sign in. Staff and
- * complainant sessions are separate; the event says which one expired.
+ * Dispatched on `window` when a signed-in call comes back 401, so the session
+ * provider can drop its state and send the user to sign in.
  */
 export const UNAUTHORIZED_EVENT = "aduan:unauthorized"
-export type UnauthorizedEventDetail = { scope: SessionScope }
 
-function scopeOf(path: string): SessionScope | null {
-  if (path.startsWith("/complainant/")) return "complainant"
-  if (/^\/(admin|referrals|auth)\//.test(path)) return "staff"
-  return null
-}
+const needsSession = (path: string) =>
+  /^\/(admin|referrals|auth|complainant)\//.test(path)
 
 /** A 401 from these means "wrong credentials", not "session expired". */
 const CREDENTIAL_ENDPOINTS = new Set([
   "/auth/login",
   // A wrong *current* password on change is 401 too; the session is fine.
   "/auth/password",
-  "/complainant/auth/verify",
+  "/auth/register/verify",
   // The steps of staff sign-in and reset (§8 decision 14): a 401 there is a
   // wrong code or a spent token, never an expired session.
   "/auth/login/verify",
@@ -171,18 +162,13 @@ export async function api<T>(path: string, init: ApiInit = {}): Promise<T> {
   const body = (await res.json().catch(() => null)) as ApiErrorBody | null
 
   if (!res.ok) {
-    const scope = scopeOf(path)
     if (
       res.status === 401 &&
-      scope &&
+      needsSession(path) &&
       !CREDENTIAL_ENDPOINTS.has(path) &&
       typeof window !== "undefined"
     ) {
-      window.dispatchEvent(
-        new CustomEvent<UnauthorizedEventDetail>(UNAUTHORIZED_EVENT, {
-          detail: { scope },
-        })
-      )
+      window.dispatchEvent(new Event(UNAUTHORIZED_EVENT))
     }
     throw new ApiRequestError(res.status, body?.error ?? res.statusText, body)
   }
@@ -234,27 +220,9 @@ export const publicApi = {
     api<PublicComplaintDetail>(`/complaints/${ref(refNo)}`),
 }
 
-// ─── Complainant (email OTP, cookie aduan_csid) ──────────────────────────────
+// ─── A signed-in account's own complaints (/api/complainant) ─────────────────
 
 export const complainantApi = {
-  requestCode: (email: string) =>
-    api<OtpRequested>("/complainant/auth/request-code", {
-      method: "POST",
-      json: { email },
-    }),
-  /** §8 decision 13: name + email; the emailed code is then entered at verify. */
-  register: (email: string, fullName: string) =>
-    api<OtpRequested>("/complainant/auth/register", {
-      method: "POST",
-      json: { email, fullName },
-    }),
-  verify: (email: string, code: string) =>
-    api<ComplainantSession>("/complainant/auth/verify", {
-      method: "POST",
-      json: { email, code },
-    }),
-  logout: () => api<void>("/complainant/auth/logout", { method: "POST" }),
-  me: () => api<ComplainantSession>("/complainant/auth/me"),
   complaints: () => api<PublicComplaint[]>("/complainant/complaints"),
   complaint: (refNo: string) =>
     api<PublicComplaintDetail>(`/complainant/complaints/${ref(refNo)}`),
@@ -286,6 +254,22 @@ export const adminApi = {
       api<AdminComplaint[]>("/admin/complaints/duplicate-candidates", {
         method: "POST",
         json: body,
+      }),
+    /** §8 decision 16: BARU -> PENDUA, pointing at the original case. */
+    confirmDuplicate: (id: string, duplicateOfId: string) =>
+      api<AdminComplaint>(`/admin/complaints/${id}/duplicate`, {
+        method: "POST",
+        json: { duplicateOfId },
+      }),
+    /** PENDUA -> BARU. */
+    undoDuplicate: (id: string) =>
+      api<AdminComplaint>(`/admin/complaints/${id}/duplicate`, {
+        method: "DELETE",
+      }),
+    /** "Bukan pendua": drops the stored suspicion; status unchanged. */
+    dismissDuplicateSuspicion: (id: string) =>
+      api<AdminComplaint>(`/admin/complaints/${id}/duplicate-suspicion`, {
+        method: "DELETE",
       }),
     /** DALAM_TINDAKAN -> SELESAI; 409 from any other status. */
     close: (id: string) =>

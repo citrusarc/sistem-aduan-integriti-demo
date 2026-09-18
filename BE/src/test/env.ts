@@ -49,3 +49,10 @@ process.env.UPLOAD_DIR = mkdtempSync(
 );
 // Lets the harness capture outbound email instead of printing it.
 process.env.NODE_ENV = "test";
+// Tests register many complainants and submit many complaints from 127.0.0.1;
+// the anti-spam limits (§8 decision 16) are exercised by their own tests,
+// which set config.portal directly.
+process.env.PORTAL_SUBMISSIONS_PER_IP_PER_HOUR = "0";
+process.env.PORTAL_ACK_EMAILS_PER_DAY = "1000";
+// No automatic first ADMIN unless a test asks for one (sets config directly).
+process.env.INITIAL_ADMIN_EMAIL = "";

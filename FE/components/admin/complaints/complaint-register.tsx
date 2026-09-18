@@ -4,6 +4,7 @@ import * as React from "react"
 import Link from "next/link"
 import { useSearchParams } from "next/navigation"
 
+import { Badge } from "@/components/ui/badge"
 import { Button, buttonVariants } from "@/components/ui/button"
 import { DateDisplay } from "@/components/ui/date-display"
 import {
@@ -54,6 +55,8 @@ const PARAMS = {
   saluran: "sourceChannel",
   dari: "from",
   hingga: "to",
+  // §8 decision 16: "1" lists only complaints flagged as likely repeats.
+  pendua: "suspectedDuplicate",
 } as const
 
 type FilterKey = (typeof PARAMS)[keyof typeof PARAMS]
@@ -75,6 +78,7 @@ function filtersFrom(params: URLSearchParams): ComplaintFilters {
     sourceChannel: oneOf(SOURCE_CHANNEL, params.get("saluran")),
     from: date(params.get("dari")),
     to: date(params.get("hingga")),
+    suspectedDuplicate: params.get("pendua") === "1" ? true : undefined,
   }
 }
 
@@ -173,12 +177,27 @@ export function ComplaintRegister() {
             onChange={(e) => setFilter("to", e.target.value || null)}
           />
         </FormField>
-        {activeCount > 0 && (
-          <div className="flex items-center justify-between gap-2 sm:col-span-2 lg:col-span-3 xl:col-span-6">
+        <div className="flex flex-wrap items-center justify-between gap-2 sm:col-span-2 lg:col-span-3 xl:col-span-6">
+          <Button
+            variant={filters.suspectedDuplicate ? "secondary" : "outline"}
+            size="sm"
+            aria-pressed={Boolean(filters.suspectedDuplicate)}
+            onClick={() =>
+              setFilter(
+                "suspectedDuplicate",
+                filters.suspectedDuplicate ? null : "1"
+              )
+            }
+          >
+            Mungkin pendua sahaja
+          </Button>
+          {activeCount > 0 && (
             <p className="text-xs text-muted-foreground">
               {activeCount} penapis aktif. Tempoh mengikut tarikh terima di UI
               (atau tarikh aduan jika tiada).
             </p>
+          )}
+          {activeCount > 0 && (
             <Button
               variant="ghost"
               size="sm"
@@ -190,8 +209,8 @@ export function ComplaintRegister() {
             >
               Kosongkan penapis
             </Button>
-          </div>
-        )}
+          )}
+        </div>
       </div>
 
       {invertedRange ? null : list.status === "error" ? (
@@ -256,7 +275,12 @@ export function ComplaintRegister() {
                     {labelFor(SOURCE_CHANNEL, c.sourceChannel)}
                   </TableCell>
                   <TableCell>
-                    <StatusPill status={c.status} />
+                    <span className="flex flex-wrap items-center gap-1">
+                      <StatusPill status={c.status} />
+                      {c.suspectedDuplicateOfId && (
+                        <Badge tone="accent">Mungkin pendua</Badge>
+                      )}
+                    </span>
                   </TableCell>
                 </TableRow>
               ))}

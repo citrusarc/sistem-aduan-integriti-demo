@@ -5,7 +5,7 @@ import { HttpError } from "../middleware/error-handler.js";
 import {
   clearSessionCookie,
   readSessionToken,
-  requireStaff,
+  requireSignedIn,
   setSessionCookie,
 } from "../middleware/auth.js";
 import {
@@ -18,14 +18,15 @@ import {
 import {
   consumeAuthChallenge,
   createAuthChallenge,
-  createFirstAdmin,
   createSession,
   deleteAllSessionsForStaff,
   deleteSession,
   getCredentialsByEmail,
   getCredentialsById,
-  hasNoStaffAccounts,
+  markEmailVerified,
   peekAuthChallengeStaff,
+  promoteInitialAdmin,
+  registerAccount,
   recordFailedLogin,
   recordSuccessfulLogin,
   setPassword,
@@ -37,11 +38,18 @@ import {
   createCaptcha,
   solveCaptcha,
 } from "../auth/captcha.js";
-import { INTEGRITY_UNIT_ROLES } from "../auth/roles.js";
+import { isIntegrityUnitRole } from "../auth/roles.js";
+import { hasConsoleAccess, ROLE_PERMISSIONS } from "../auth/permissions.js";
 import { notifyByEmail } from "../notify/email.js";
+import type { StaffRole } from "../types/enums.js";
 
 /**
- * Staff sign-in — §1 "Staff auth", §8 decision 14.
+ * Sign-in and registration for every account — staff and complainants alike
+ * (§8 decisions 14 and 15). One page, one cookie; the role decides the rest.
+ *
+ *   POST /register                name + email + password + captchaToken
+ *                                   -> verifyToken; a code is emailed
+ *   POST /register/verify         verifyToken + code -> session
  *
  *   GET  /captcha                 slider picture
  *   POST /captcha/verify          slide -> captchaToken (one use)
@@ -55,7 +63,7 @@ import { notifyByEmail } from "../notify/email.js";
  *                                   is emailed if the account exists
  *   POST /reset-password          resetToken + code + newPassword
  *
- * No step reveals whether an email belongs to staff: unknown emails get the
+ * No step reveals whether an email has an account: unknown emails get the
  * same answers, tokens that look the same, and cost the same scrypt. Codes go
  * by email only (rule 10) — printed to this terminal locally.
  */
@@ -71,6 +79,16 @@ const code = z
   .regex(new RegExp(`^\\d{${STAFF_CODE_DIGITS}}$`));
 
 const loginSchema = z.object({ email, password, captchaToken: token });
+const registerSchema = z.object({
+  fullName: z
+    .string()
+    .trim()
+    .min(2, "Nama mesti sekurang-kurangnya 2 aksara")
+    .max(200),
+  email: z.string().trim().max(254).pipe(z.email("Alamat e-mel tidak sah")),
+  password,
+  captchaToken: token,
+});
 const changePasswordSchema = z.object({
   currentPassword: password,
   newPassword: password,
@@ -87,6 +105,8 @@ const CAPTCHA_REQUIRED =
   "Sahkan captcha sebelum log masuk. Muat semula captcha jika telah tamat tempoh.";
 const INVALID_CODE =
   "Kod tidak sah, telah digunakan, atau telah tamat tempoh. Log masuk semula untuk mendapatkan kod baharu.";
+const EMAIL_NOT_VERIFIED =
+  "E-mel akaun ini belum disahkan. Daftar semula dengan e-mel yang sama untuk mendapatkan kod pengesahan baharu.";
 const ACCOUNT_BLOCKED =
   'Akaun disekat selepas 5 cubaan kata laluan yang gagal. Gunakan "Lupa kata laluan" atau hubungi ADMIN untuk membukanya.';
 
@@ -117,10 +137,38 @@ type SignedIn = {
   id: string;
   email: string;
   full_name: string;
-  role: string;
+  role: StaffRole;
 };
 
-async function startSession(req: Request, res: Response, staff: SignedIn) {
+/**
+ * What the FE learns about the signed-in account. `permissions` decides what
+ * it SHOWS; BE checks the permission again on every request.
+ */
+function describeUser(user: {
+  id: string;
+  email: string;
+  fullName: string;
+  role: StaffRole;
+  sessionExpiresAt: Date;
+}) {
+  return {
+    ...user,
+    permissions: ROLE_PERMISSIONS[user.role],
+    isIntegrityUnit: isIntegrityUnitRole(user.role),
+    hasConsole: hasConsoleAccess(user.role),
+  };
+}
+
+async function startSession(req: Request, res: Response, signedIn: SignedIn) {
+  // §8 decision 15: the address has just been proven by an emailed code.
+  const promoted = await promoteInitialAdmin(
+    signedIn.id,
+    config.initialAdminEmail,
+  );
+  if (promoted) {
+    console.log(`[Akaun] ADMIN pertama: ${signedIn.email}`);
+  }
+  const staff = promoted ? { ...signedIn, role: "ADMIN" as const } : signedIn;
   await recordSuccessfulLogin(staff.id);
 
   // Rotate on login: any pre-existing cookie is dropped, never promoted.
@@ -135,16 +183,13 @@ async function startSession(req: Request, res: Response, staff: SignedIn) {
   });
   setSessionCookie(res, sessionToken, expiresAt);
 
-  return {
+  return describeUser({
     id: staff.id,
     email: staff.email,
     fullName: staff.full_name,
     role: staff.role,
-    isIntegrityUnit: (INTEGRITY_UNIT_ROLES as readonly string[]).includes(
-      staff.role,
-    ),
     sessionExpiresAt: expiresAt,
-  };
+  });
 }
 
 /** (b) + never the same password again. Throws 422 with the reason. */
@@ -229,6 +274,8 @@ authRouter.post("/login", async (req, res) => {
   }
 
   if (locked) throw new HttpError(423, ACCOUNT_BLOCKED);
+  // Only a self-registration can be unverified; said only after the password.
+  if (!staff.email_verified_at) throw new HttpError(403, EMAIL_NOT_VERIFIED);
 
   // (a) MFA: the password alone never opens a session.
   const challenge = await createAuthChallenge({
@@ -323,7 +370,7 @@ authRouter.post("/password/expired", async (req, res) => {
 // ─── Lupa kata laluan — §8 decision 14 (l) ───────────────────────────────────
 
 const RESET_REQUESTED =
-  "Jika e-mel ini milik akaun kakitangan yang aktif, kod set semula telah dihantar. Kod sah selama 10 minit.";
+  "Jika e-mel ini milik akaun yang aktif, kod set semula telah dihantar. Kod sah selama 10 minit.";
 
 authRouter.post("/forgot-password", async (req, res) => {
   const parsed = z.object({ email, captchaToken: token }).safeParse(req.body);
@@ -351,7 +398,7 @@ authRouter.post("/forgot-password", async (req, res) => {
     );
   } else if (!config.isProduction) {
     console.log(
-      `[Lupa kata laluan] Tiada kod untuk ${parsed.data.email}: bukan akaun kakitangan yang aktif.`,
+      `[Lupa kata laluan] Tiada kod untuk ${parsed.data.email}: bukan akaun yang aktif.`,
     );
   }
 
@@ -396,49 +443,96 @@ authRouter.post("/reset-password", async (req, res) => {
   res.status(204).end();
 });
 
-// ─── First-run setup — §8 decision 13 ────────────────────────────────────────
+// ─── Registration — §8 decision 15 ───────────────────────────────────────────
+
+const REGISTRATION_CODE_SENT =
+  "Kod pengesahan telah dihantar ke e-mel ini. Masukkan kod untuk melengkapkan pendaftaran. Kod sah selama 10 minit.";
 
 /**
- * With no staff accounts at all, the console offers to create the first ADMIN;
- * once any account exists this is closed for good (409). Not available in
- * production, where the first ADMIN comes from `npm run staff -- create`.
+ * Anyone may register; the account is PENGADU until ADMIN gives it a role.
+ * The answer is the same whether the address is new, pending or already has
+ * an account, so registration can't be used to find out who has one. An
+ * existing owner is told by email instead, and gets a token no code satisfies.
  */
-const setupSchema = z.object({
-  email: z.string().trim().max(254).pipe(z.email("Alamat e-mel tidak sah")),
-  fullName: z
-    .string()
-    .trim()
-    .min(2, "Nama mesti sekurang-kurangnya 2 aksara")
-    .max(200),
-  password,
-});
-
-authRouter.get("/setup", async (_req, res) => {
-  const setupRequired = !config.isProduction && (await hasNoStaffAccounts());
-  res.json({ data: { setupRequired } });
-});
-
-authRouter.post("/setup", async (req, res) => {
-  if (config.isProduction) {
+authRouter.post("/register", async (req, res) => {
+  const parsed = registerSchema.safeParse(req.body);
+  if (!parsed.success) {
     throw new HttpError(
-      403,
-      "Persediaan melalui pelayar dimatikan dalam produksi. Gunakan npm run staff -- create.",
+      parsed.error.issues.some((i) => i.path[0] === "captchaToken") ? 400 : 422,
+      parsed.error.issues.some((i) => i.path[0] === "captchaToken")
+        ? CAPTCHA_REQUIRED
+        : z.prettifyError(parsed.error),
     );
   }
-  const parsed = setupSchema.safeParse(req.body);
-  if (!parsed.success) throw new HttpError(422, z.prettifyError(parsed.error));
+  const { fullName, password: newPassword, captchaToken } = parsed.data;
+  const address = parsed.data.email.toLowerCase();
 
-  const policyError = checkPasswordPolicy(parsed.data.password);
+  // Policy first: a weak password is the registrant's own mistake to fix, and
+  // saying so reveals nothing about the address.
+  const policyError = checkPasswordPolicy(newPassword);
   if (policyError) throw new HttpError(422, policyError);
+  if (!(await consumeCaptchaPass(captchaToken))) {
+    throw new HttpError(400, CAPTCHA_REQUIRED);
+  }
 
-  const staff = await createFirstAdmin({
-    email: parsed.data.email.toLowerCase(),
-    fullName: parsed.data.fullName,
-    passwordHash: await hashPassword(parsed.data.password),
+  const result = await registerAccount({
+    email: address,
+    fullName,
+    passwordHash: await hashPassword(newPassword),
   });
-  console.log(`[Persediaan] Akaun ADMIN pertama dicipta: ${staff.email}`);
+  const challenge = await createAuthChallenge({
+    staffId: result.state === "pending" ? result.id : null,
+    purpose: "REGISTER",
+    ttlMinutes: config.auth.codeTtlMinutes,
+    withCode: true,
+  });
 
-  res.status(201).json({ data: await startSession(req, res, staff) });
+  if (result.state === "pending" && challenge.code) {
+    sendCode(
+      address,
+      "Kod pengesahan pendaftaran Sistem Aduan Integriti",
+      `Anda (diharap anda) mendaftar akaun Sistem Aduan Integriti dengan e-mel ${address}.`,
+      challenge.code,
+    );
+  } else {
+    void notifyByEmail({
+      to: address,
+      subject: "Percubaan pendaftaran Sistem Aduan Integriti",
+      text: [
+        `Seseorang cuba mendaftar akaun baharu dengan e-mel ${address}, tetapi akaun untuk e-mel ini sudah wujud.`,
+        "",
+        'Jika itu anda, log masuk seperti biasa atau gunakan "Lupa kata laluan".',
+        "Jika bukan, abaikan e-mel ini — akaun anda tidak berubah.",
+      ].join("\n"),
+    }).catch((err: unknown) => {
+      console.error("Gagal menghantar notis pendaftaran:", err);
+    });
+  }
+
+  res.status(202).json({
+    data: {
+      verifyToken: challenge.token,
+      sentTo: maskEmail(address),
+      message: REGISTRATION_CODE_SENT,
+    },
+  });
+});
+
+authRouter.post("/register/verify", async (req, res) => {
+  const parsed = z.object({ verifyToken: token, code }).safeParse(req.body);
+  if (!parsed.success) throw new HttpError(401, INVALID_CODE);
+
+  const staffId = await verifyAuthChallengeCode(
+    parsed.data.verifyToken,
+    "REGISTER",
+    parsed.data.code,
+  );
+  if (staffId) await markEmailVerified(staffId);
+  const account = staffId ? await getCredentialsById(staffId) : undefined;
+  if (!account || !account.is_active) throw new HttpError(401, INVALID_CODE);
+
+  console.log(`[Akaun] Pendaftaran disahkan: ${account.email}`);
+  res.json({ data: await startSession(req, res, account) });
 });
 
 // ─── Session ─────────────────────────────────────────────────────────────────
@@ -450,16 +544,8 @@ authRouter.post("/logout", async (req, res) => {
   res.status(204).end();
 });
 
-authRouter.get("/me", requireStaff(), (req, res) => {
-  const staff = req.staff!;
-  res.json({
-    data: {
-      ...staff,
-      isIntegrityUnit: (INTEGRITY_UNIT_ROLES as readonly string[]).includes(
-        staff.role,
-      ),
-    },
-  });
+authRouter.get("/me", requireSignedIn(), (req, res) => {
+  res.json({ data: describeUser(req.user!) });
 });
 
 /**
@@ -467,13 +553,13 @@ authRouter.get("/me", requireStaff(), (req, res) => {
  * session, so a hijacked or unattended session can't be used to take over the
  * account. Signs out every OTHER session.
  */
-authRouter.post("/password", requireStaff(), async (req, res) => {
+authRouter.post("/password", requireSignedIn(), async (req, res) => {
   const parsed = changePasswordSchema.safeParse(req.body);
   if (!parsed.success) {
     throw new HttpError(422, z.prettifyError(parsed.error));
   }
 
-  const staff = req.staff!;
+  const staff = req.user!;
   const credentials = await getCredentialsByEmail(staff.email);
   const ok =
     credentials?.password_hash &&

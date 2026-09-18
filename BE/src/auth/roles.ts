@@ -5,10 +5,11 @@ import type { StaffRole } from "../types/enums.js";
  * register, JMM decisions, NFA cases, and internal notes.
  *
  * KJ and SUB_UNIT are real staff roles but sit OUTSIDE the unit: a department
- * head or sub-unit officer receiving a referred action. Letting them through
- * this gate would break business rule 2 (NFA confidentiality) and rule 9
- * (internal notes), so every /api/admin/* router is gated on this list rather
- * than on "any logged-in staff".
+ * head or sub-unit officer receiving a referred action. PENGADU is a
+ * registered complainant. Letting any of them through would break business
+ * rule 2 (NFA confidentiality) and rule 9 (internal notes), so every
+ * permission that opens /api/admin/* is granted to this list only (see
+ * permissions.ts).
  *
  * Adding a role to staff_role_enum does NOT add it here. That is deliberate.
  */
@@ -30,3 +31,10 @@ export const REFERRAL_RECIPIENT_ROLES = [
   "KJ",
   "SUB_UNIT",
 ] as const satisfies readonly StaffRole[];
+
+/** What every self-registration gets (§8 decision 15). ADMIN promotes from here. */
+export const DEFAULT_SIGNUP_ROLE = "PENGADU" satisfies StaffRole;
+
+export function isIntegrityUnitRole(role: StaffRole): boolean {
+  return (INTEGRITY_UNIT_ROLES as readonly StaffRole[]).includes(role);
+}

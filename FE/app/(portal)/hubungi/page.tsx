@@ -77,15 +77,15 @@ const FAQ: {
             </Link>
             , atau{" "}
             <Link href="/me" className={link}>
-              log masuk dengan e-mel
+              log masuk atau daftar
             </Link>{" "}
-            untuk melihat semua aduan anda.
+            dengan e-mel yang sama untuk melihat semua aduan anda.
           </>
         ),
       },
       {
         q: "No. rujukan saya tidak dijumpai.",
-        a: "Pastikan nombor dimasukkan tepat seperti dalam e-mel pengesahan, termasuk tanda garis miring (/). Anda juga boleh log masuk dengan e-mel yang digunakan semasa membuat aduan.",
+        a: "Pastikan nombor dimasukkan tepat seperti dalam e-mel pengesahan, termasuk tanda garis miring (/). Anda juga boleh log masuk (atau daftar) dengan e-mel yang digunakan semasa membuat aduan.",
       },
       {
         q: "Apakah maksud setiap status?",
@@ -122,15 +122,15 @@ const FAQ: {
             <Link href="/me" className={link}>
               Aduan Saya
             </Link>{" "}
-            dengan e-mel yang digunakan semasa membuat aduan, kemudian hantar
-            permohonan untuk aduan tersebut. Permohonan dinilai oleh Ketua Unit
-            Integriti.
+            dengan akaun ber-e-mel sama seperti semasa membuat aduan, kemudian
+            hantar permohonan untuk aduan tersebut. Permohonan dinilai oleh
+            Ketua Unit Integriti.
           </>
         ),
       },
       {
         q: "Adakah saya akan menerima SMS?",
-        a: "Tidak. Semua makluman dan kod log masuk dihantar melalui e-mel sahaja. Nombor telefon, jika diberikan, hanya digunakan oleh pegawai untuk menghubungi anda secara manual. Abaikan sebarang SMS yang mendakwa daripada sistem ini.",
+        a: "Tidak. Semua makluman dan kod pengesahan dihantar melalui e-mel sahaja. Nombor telefon, jika diberikan, hanya digunakan oleh pegawai untuk menghubungi anda secara manual. Abaikan sebarang SMS yang mendakwa daripada sistem ini.",
       },
     ],
   },

@@ -7,6 +7,7 @@ import { usePathname, useRouter, useSearchParams } from "next/navigation"
 import { CaseActions } from "@/components/admin/complaints/case-actions"
 import { CaseDocuments } from "@/components/admin/complaints/case-documents"
 import { DecisionCard } from "@/components/admin/complaints/decision-card"
+import { DuplicatePanel } from "@/components/admin/complaints/duplicate-panel"
 import { BackLink } from "@/components/ui/back-link"
 import { Button } from "@/components/ui/button"
 import { DateDisplay } from "@/components/ui/date-display"
@@ -137,6 +138,8 @@ function CaseFileView({
           </Button>
         </Notice>
       )}
+
+      <DuplicatePanel complaint={complaint} reload={reload} />
 
       {complaint.status === "NFA" && (
         <Notice tone="info">

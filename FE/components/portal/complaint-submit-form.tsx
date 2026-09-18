@@ -16,7 +16,7 @@ import {
   type ComplainantDetails,
 } from "@/components/complaints/borang-aduan-fields"
 import { DocumentPicker } from "@/components/complaints/document-picker"
-import { useComplainantSession } from "@/components/providers/complainant-session"
+import { useSession } from "@/components/providers/session"
 import { Button, buttonVariants } from "@/components/ui/button"
 import { IntegrityCategorySelect } from "@/components/ui/enum-select"
 import { CheckboxField, FieldControl, FormField } from "@/components/ui/field"
@@ -126,13 +126,13 @@ export function ComplaintSubmitForm() {
 
   const errors = touched ? validate(form) : {}
 
-  // A signed-in complainant (§8 decision 13): start the named form with their
+  // A signed-in account (§8 decisions 13 and 15): start the named form with their
   // account's name and email, once. Complaints link to accounts by email, so
   // keeping it lets the complaint appear under "Aduan saya".
-  const complainantSession = useComplainantSession()
+  const complainantSession = useSession()
   const signedIn =
     complainantSession.status === "authenticated"
-      ? complainantSession.session
+      ? complainantSession.user
       : null
   const prefilled = React.useRef(false)
   React.useEffect(() => {
@@ -142,7 +142,7 @@ export function ComplaintSubmitForm() {
       ...prev,
       complainant: {
         ...prev.complainant,
-        particulars: prev.complainant.particulars || (signedIn.fullName ?? ""),
+        particulars: prev.complainant.particulars || signedIn.fullName,
         contactEmail: prev.complainant.contactEmail || signedIn.email,
       },
     }))
@@ -548,7 +548,8 @@ function Success({
       {email ? (
         <p className="max-w-md text-sm">
           Simpan nombor ini — ia diperlukan untuk menyemak status. Pengesahan
-          juga dihantar ke <strong>{email}</strong>.
+          dihantar ke <strong>{email}</strong>, kecuali jika aduan yang serupa
+          baru dihantar dari e-mel yang sama.
         </p>
       ) : (
         <Notice tone="warning" className="max-w-md text-left">

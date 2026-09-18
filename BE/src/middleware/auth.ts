@@ -1,14 +1,14 @@
 import type { Request, RequestHandler, Response } from "express";
 import { config } from "../config.js";
 import { HttpError } from "./error-handler.js";
-import { resolveSession, type AuthenticatedStaff } from "../auth/store.js";
-import type { StaffRole } from "../types/enums.js";
+import { resolveSession, type AuthenticatedUser } from "../auth/store.js";
+import { hasPermission, type Permission } from "../auth/permissions.js";
 
 declare global {
   // eslint-disable-next-line @typescript-eslint/no-namespace
   namespace Express {
     interface Request {
-      staff?: AuthenticatedStaff;
+      user?: AuthenticatedUser;
       sessionToken?: string;
     }
   }
@@ -65,18 +65,19 @@ export const requireTrustedOrigin: RequestHandler = (req, _res, next) => {
 };
 
 /**
- * Session gate for staff routes.
+ * Session gates. Staff and complainants share one account table, one sign-in
+ * and this one cookie (§8 decision 15); what a session may do comes from its
+ * role's permissions (src/auth/permissions.ts), never from "is signed in".
  *
- *   requireStaff()                         any active, logged-in staff
- *   requireStaff(...INTEGRITY_UNIT_ROLES)  only those roles
+ *   requireSignedIn()                       any active, signed-in account
+ *   requirePermission("complaints.manage")  only roles holding it
  *
- * Every /api/admin/* router passes INTEGRITY_UNIT_ROLES. Do not mount one with
- * a bare requireStaff(): KJ and SUB_UNIT are staff, but outside the Integrity
- * Unit, and must not see the case register (rules 2 and 9).
+ * Never gate a data route on requireSignedIn() alone: a PENGADU is signed in
+ * too. /api/admin/* uses Integrity Unit permissions (rules 2 and 9).
  *
- * 401 = not signed in (or session expired/revoked). 403 = signed in, wrong role.
+ * 401 = not signed in (or session expired/revoked). 403 = signed in, not allowed.
  */
-export function requireStaff(...allowed: readonly StaffRole[]): RequestHandler {
+function gate(permission: Permission | null): RequestHandler {
   return async (req, res, next) => {
     try {
       const token = readSessionToken(req);
@@ -84,8 +85,8 @@ export function requireStaff(...allowed: readonly StaffRole[]): RequestHandler {
         return next(new HttpError(401, "Sila log masuk"));
       }
 
-      const staff = await resolveSession(token, config.auth.idleTimeoutMinutes);
-      if (!staff) {
+      const user = await resolveSession(token, config.auth.idleTimeoutMinutes);
+      if (!user) {
         clearSessionCookie(res);
         return next(
           new HttpError(
@@ -95,11 +96,11 @@ export function requireStaff(...allowed: readonly StaffRole[]): RequestHandler {
         );
       }
 
-      if (allowed.length && !allowed.includes(staff.role)) {
+      if (permission && !hasPermission(user.role, permission)) {
         return next(new HttpError(403, "Peranan anda tidak dibenarkan"));
       }
 
-      req.staff = staff;
+      req.user = user;
       req.sessionToken = token;
       next();
     } catch (err) {
@@ -107,3 +108,8 @@ export function requireStaff(...allowed: readonly StaffRole[]): RequestHandler {
     }
   };
 }
+
+export const requireSignedIn = (): RequestHandler => gate(null);
+
+export const requirePermission = (permission: Permission): RequestHandler =>
+  gate(permission);

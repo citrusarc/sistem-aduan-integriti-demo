@@ -21,6 +21,7 @@ import {
   sectorSchema,
   sourceChannelSchema,
   timeStringSchema,
+  idSchema,
 } from "./common.js";
 
 /** Blank input -> null, like optionalText, before the format check. */
@@ -222,12 +223,22 @@ export const complaintFiltersSchema = z
     sourceChannel: sourceChannelSchema.optional(),
     sector: sectorSchema.optional(),
     status: complaintStatusSchema.optional(),
+    /** §8 decision 16: "true" lists only complaints flagged as likely repeats. */
+    suspectedDuplicate: z
+      .enum(["true", "false"])
+      .transform((v) => v === "true")
+      .optional(),
     /** Period, on the same date stats uses (PERIOD_DATE_SQL). */
     ...dateRangeFields,
     limit: z.coerce.number().int().min(1).max(200).optional(),
     offset: z.coerce.number().int().min(0).optional(),
   })
   .refine(dateRangeIsOrdered, dateRangeMessage);
+
+/** §8 decision 16: the case this complaint repeats. */
+export const confirmDuplicateSchema = z.strictObject({
+  duplicateOfId: idSchema,
+});
 
 export const duplicateCheckSchema = z.object({
   accusedParticulars: optionalText(2000),

@@ -146,6 +146,25 @@ export async function createDecision(input: CreateDecisionInput): Promise<{
     const decision = inserted.rows[0];
     if (!decision) throw new Error("Gagal merekod keputusan JMM");
 
+    // §8 decision 15: the account table holds complainants too (PENGADU).
+    // A signatory linked to an account must be a staff member.
+    const linked = input.signatories
+      .map((s) => s.staffId)
+      .filter((id): id is string => Boolean(id));
+    if (linked.length) {
+      const pengadu = await client.query(
+        `SELECT 1 FROM staff_users
+          WHERE id = ANY($1::bigint[]) AND role = 'PENGADU'`,
+        [linked],
+      );
+      if (pengadu.rowCount) {
+        throw new DomainError(
+          422,
+          "Penandatangan mesti akaun kakitangan, bukan akaun pengadu",
+        );
+      }
+    }
+
     const signatories: JmmDecisionSignatoryRow[] = [];
     for (const signatory of input.signatories) {
       const row = await client.query<JmmDecisionSignatoryRow>(

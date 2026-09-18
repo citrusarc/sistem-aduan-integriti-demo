@@ -45,6 +45,8 @@ export type ComplaintFilters = Pagination & {
   from?: string
   to?: string
   status?: ComplaintStatus
+  /** §8 decision 16: only complaints flagged as likely repeats. */
+  suspectedDuplicate?: boolean
   reportYear?: number
   reportMonth?: string
   integrityCategory?: IntegrityCategory

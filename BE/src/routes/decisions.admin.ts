@@ -1,8 +1,7 @@
 import { Router } from "express";
 import { z } from "zod";
 import { HttpError } from "../middleware/error-handler.js";
-import { requireStaff } from "../middleware/auth.js";
-import { INTEGRITY_UNIT_ROLES } from "../auth/roles.js";
+import { requirePermission } from "../middleware/auth.js";
 import { idSchema } from "../validation/common.js";
 import {
   decisionLogFiltersSchema,
@@ -34,7 +33,7 @@ import {
 } from "../db/mappers.js";
 
 export const adminDecisionsRouter: Router = Router();
-adminDecisionsRouter.use(requireStaff(...INTEGRITY_UNIT_ROLES));
+adminDecisionsRouter.use(requirePermission("complaints.manage"));
 
 /** Decision log: `outcome`, `from`/`to` (decision date), `meetingId`, `limit`, `offset`. */
 adminDecisionsRouter.get("/", async (req, res) => {
@@ -127,7 +126,7 @@ adminDecisionsRouter.post("/:id/sign", async (req, res) => {
 });
 
 export const adminCaseActionsRouter: Router = Router();
-adminCaseActionsRouter.use(requireStaff(...INTEGRITY_UNIT_ROLES));
+adminCaseActionsRouter.use(requirePermission("complaints.manage"));
 
 /**
  * Who an action can be referred to: KJ / SUB_UNIT accounts, with `isActive` so

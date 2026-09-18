@@ -16,7 +16,8 @@ const COMPLAINT_COLUMNS = `
   integrity_category, sector, case_description, complaint_date,
   received_date_ui, incident_date, incident_time, has_supporting_documents,
   received_via, status, status_changed_at, disclaimer_acknowledged_at,
-  created_at, updated_at
+  suspected_duplicate_of_complaint_id, duplicate_score, duplicate_reasons,
+  duplicate_of_complaint_id, created_at, updated_at
 `;
 
 /**
@@ -36,6 +37,8 @@ export type ComplaintFilters = {
   sourceChannel?: string;
   sector?: string;
   status?: ComplaintStatus;
+  /** §8 decision 16: only complaints still carrying a duplicate suspicion. */
+  suspectedDuplicate?: boolean;
   /** Inclusive 'YYYY-MM-DD' bounds on PERIOD_DATE_SQL. */
   from?: string;
   to?: string;
@@ -71,6 +74,9 @@ export async function listComplaints(
   }
   if (filters.status !== undefined) {
     add("status = $?", filters.status);
+  }
+  if (filters.suspectedDuplicate) {
+    conditions.push("suspected_duplicate_of_complaint_id IS NOT NULL");
   }
   if (filters.from !== undefined) {
     add(`${PERIOD_DATE_SQL} >= $?::date`, filters.from);
@@ -122,13 +128,22 @@ export async function getComplaintByRefNo(
  * has exactly one definition.
  *
  * Hidden: status NFA, and any complaint that has EVER had an NFA decision —
- * re-tabling a case does not make it disclosable again.
+ * re-tabling a case does not make it disclosable again. Also hidden: a PENDUA
+ * complaint whose original is (or ever was) NFA (§8 decision 16) — "this
+ * repeats an existing case" would confirm that the NFA case exists.
  */
 export const PUBLICLY_DISCLOSABLE_SQL = `(
   c.status <> 'NFA'
   AND NOT EXISTS (
         SELECT 1 FROM jmm_decisions d
          WHERE d.complaint_id = c.id AND d.outcome = 'NFA'
+      )
+  AND NOT EXISTS (
+        SELECT 1 FROM complaints o
+         WHERE o.id = c.duplicate_of_complaint_id
+           AND (o.status = 'NFA'
+                OR EXISTS (SELECT 1 FROM jmm_decisions od
+                            WHERE od.complaint_id = o.id AND od.outcome = 'NFA'))
       )
 )`;
 
@@ -325,6 +340,12 @@ export type CreateComplaintInput = {
   attachments?: readonly PreparedAttachment[];
   /** Who uploaded them; null for a portal submission. */
   uploadedByStaffId?: string | null;
+  /** §8 decision 16: from assessDuplicate(), stored for staff to review. */
+  suspectedDuplicate?: {
+    complaintId: string;
+    score: number;
+    reasons: readonly string[];
+  } | null;
 };
 
 /**
@@ -390,13 +411,14 @@ export async function createComplaint(
          received_date_ui, status, disclaimer_acknowledged_at,
          accused_position, accused2_particulars, accused2_department,
          accused2_position, incident_date, incident_time,
-         has_supporting_documents, received_via
+         has_supporting_documents, received_via,
+         suspected_duplicate_of_complaint_id, duplicate_score, duplicate_reasons
        )
        -- §8 decision 1: a new complaint is BARU, written explicitly rather
        -- than left to the column default.
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,'BARU',
                CASE WHEN $17::boolean THEN now() END,
-               $18,$19,$20,$21,$22,$23,$24,$25)
+               $18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28)
        RETURNING ${COMPLAINT_COLUMNS}`,
       [
         seqNo,
@@ -424,6 +446,9 @@ export async function createComplaint(
         input.incidentTime ?? null,
         input.hasSupportingDocuments ?? null,
         input.receivedVia ?? null,
+        input.suspectedDuplicate?.complaintId ?? null,
+        input.suspectedDuplicate?.score ?? null,
+        input.suspectedDuplicate ? [...input.suspectedDuplicate.reasons] : null,
       ],
     );
 
@@ -597,4 +622,166 @@ export async function closeComplaint(id: string): Promise<ComplaintRow> {
     await applyStatusEvent(client, complaint, { type: "CASE_CLOSED" });
     return lockComplaint(client, id);
   });
+}
+
+// ─── Duplicates — §8 decision 16 ─────────────────────────────────────────────
+
+export type DuplicatePoolRow = {
+  id: string;
+  complaint_ref_no: string;
+  accused_particulars: string | null;
+  accused2_particulars: string | null;
+  accused_department: string | null;
+  accused2_department: string | null;
+  case_description: string | null;
+  contact_email: string | null;
+};
+
+/**
+ * Existing complaints worth scoring against a new one: within a year, not
+ * themselves PENDUA (a repeat points at the original), and sharing at least
+ * something — the complainant's email, an accused name or agency, or a loose
+ * trigram match on the description. Loose on purpose: assessDuplicate()
+ * decides. Includes NFA cases: the result is internal to the Integrity Unit.
+ */
+export async function listDuplicatePool(input: {
+  accusedNames: readonly string[];
+  departments: readonly string[];
+  caseDescription: string | null;
+  contactEmail: string | null;
+}): Promise<DuplicatePoolRow[]> {
+  const result = await query<DuplicatePoolRow>(
+    `WITH recent AS (
+       -- Filtered before the join: PERIOD_DATE_SQL names unqualified columns.
+       SELECT * FROM complaints
+        WHERE status <> 'PENDUA'
+          AND ${PERIOD_DATE_SQL} >= CURRENT_DATE - INTERVAL '365 days'
+     )
+     SELECT c.id, c.complaint_ref_no, c.accused_particulars,
+            c.accused2_particulars, c.accused_department, c.accused2_department,
+            c.case_description, lower(p.contact_email) AS contact_email
+       FROM recent c
+       LEFT JOIN complainants p ON p.id = c.complainant_id
+      WHERE (
+              ($4::text IS NOT NULL AND lower(p.contact_email) = $4)
+           OR EXISTS (SELECT 1 FROM unnest($1::text[]) AS n(name)
+                       WHERE c.accused_particulars  ILIKE '%' || n.name || '%'
+                          OR c.accused2_particulars ILIKE '%' || n.name || '%')
+           OR EXISTS (SELECT 1 FROM unnest($2::text[]) AS d(dept)
+                       WHERE c.accused_department  ILIKE '%' || d.dept || '%'
+                          OR c.accused2_department ILIKE '%' || d.dept || '%')
+           OR ($3::text IS NOT NULL AND similarity(c.case_description, $3) > 0.2)
+        )
+      ORDER BY c.id DESC
+      LIMIT 50`,
+    [
+      input.accusedNames,
+      input.departments,
+      input.caseDescription,
+      input.contactEmail,
+    ],
+  );
+  return result.rows;
+}
+
+/** Recent descriptions, for word rarity (IDF). Newest first. */
+export async function listRecentDescriptions(limit = 1000): Promise<string[]> {
+  const result = await query<{ case_description: string }>(
+    `SELECT case_description FROM complaints
+      WHERE case_description IS NOT NULL
+      ORDER BY id DESC LIMIT $1`,
+    [limit],
+  );
+  return result.rows.map((r) => r.case_description);
+}
+
+/**
+ * Complaints registered with this contact email in the last `hours` — the
+ * acknowledgement emails it has been sent, near enough. `email` lower-cased.
+ */
+export async function countRecentComplaintsForEmail(
+  email: string,
+  hours: number,
+): Promise<number> {
+  const row = await queryOne<{ n: number }>(
+    `SELECT count(*)::int AS n
+       FROM complaints c
+       JOIN complainants p ON p.id = c.complainant_id
+      WHERE lower(p.contact_email) = $1
+        AND c.created_at > now() - ($2::int * INTERVAL '1 hour')`,
+    [email, hours],
+  );
+  return row?.n ?? 0;
+}
+
+/**
+ * Staff confirm a repeat: BARU -> PENDUA, pointing at the original. The
+ * original must exist, differ, and not itself be PENDUA (point at the case
+ * that is actually being handled). The suspicion is cleared: it's decided.
+ */
+export async function confirmDuplicate(
+  id: string,
+  originalId: string,
+): Promise<ComplaintRow> {
+  return withTransaction(async (client) => {
+    if (id === originalId) {
+      throw new DomainError(
+        422,
+        "Aduan tidak boleh menjadi pendua dirinya sendiri",
+      );
+    }
+    const complaint = await lockComplaint(client, id);
+    const original = await client.query<{ status: ComplaintStatus }>(
+      `SELECT status FROM complaints WHERE id = $1`,
+      [originalId],
+    );
+    const originalStatus = original.rows[0]?.status;
+    if (!originalStatus) {
+      throw new DomainError(422, "Aduan asal tidak dijumpai");
+    }
+    if (originalStatus === "PENDUA") {
+      throw new DomainError(
+        422,
+        "Aduan asal itu sendiri ialah pendua — pilih aduan yang sedang diproses",
+      );
+    }
+    await client.query(
+      `UPDATE complaints
+          SET duplicate_of_complaint_id = $2,
+              suspected_duplicate_of_complaint_id = NULL,
+              duplicate_score = NULL, duplicate_reasons = NULL
+        WHERE id = $1`,
+      [id, originalId],
+    );
+    await applyStatusEvent(client, complaint, { type: "DUPLICATE_CONFIRMED" });
+    return lockComplaint(client, id);
+  });
+}
+
+/** Staff undo a PENDUA: back to BARU, no longer pointing at anything. */
+export async function undoDuplicate(id: string): Promise<ComplaintRow> {
+  return withTransaction(async (client) => {
+    const complaint = await lockComplaint(client, id);
+    await applyStatusEvent(client, complaint, { type: "DUPLICATE_UNDONE" });
+    await client.query(
+      `UPDATE complaints SET duplicate_of_complaint_id = NULL WHERE id = $1`,
+      [id],
+    );
+    return lockComplaint(client, id);
+  });
+}
+
+/** Staff decide the suspicion was wrong. Moves no status. */
+export async function dismissDuplicateSuspicion(
+  id: string,
+): Promise<ComplaintRow | undefined> {
+  return queryOne<ComplaintRow>(
+    `UPDATE complaints
+        SET suspected_duplicate_of_complaint_id = NULL,
+            duplicate_score = NULL, duplicate_reasons = NULL,
+            updated_at = now()
+      WHERE id = $1
+      RETURNING ${COMPLAINT_COLUMNS}`,
+    [id],
+  );
 }

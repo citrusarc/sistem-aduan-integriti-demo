@@ -1,7 +1,8 @@
 /**
- * §8 decisions 3, 4, 6 and 8 over the real HTTP API: portal submission with
- * contact details and anonymity, email-OTP login, a complainant's own
- * complaints (rules 2 and 9), protection requests, and rule 10 (no SMS).
+ * §8 decisions 3, 6 and 8 over the real HTTP API: portal submission with
+ * contact details and anonymity, a complainant's own complaints (rules 2 and
+ * 9), protection requests, and rule 10 (no SMS). Signing in is the shared
+ * account flow (§8 decision 15) — see accounts.test.ts.
  */
 import assert from "node:assert/strict";
 import { readdir, readFile } from "node:fs/promises";
@@ -120,29 +121,6 @@ const complaintCount = () =>
   countRows("SELECT count(*)::int AS n FROM complaints");
 
 const refPath = (refNo: string) => encodeURIComponent(refNo);
-
-async function requestCode(email: string) {
-  return ctx.anonymous.post<{ message: string }>(
-    "/complainant/auth/request-code",
-    { email },
-  );
-}
-
-function codesSentTo(email: string): string[] {
-  return ctx.emails
-    .filter((m) => m.to === email && m.subject.includes("Kod log masuk"))
-    .map((m) => m.text.match(/\b(\d{6})\b/)![1]!);
-}
-
-const verify = (email: string, code: string) =>
-  ctx.fetch("/complainant/auth/verify", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ email, code }),
-  });
-
-const wrong = (code: string) =>
-  String((Number(code) + 1) % 1_000_000).padStart(6, "0");
 
 before(async () => {
   ctx = await startTestContext();
@@ -408,185 +386,6 @@ describe("portal submission (§8 decision 3)", () => {
   });
 });
 
-describe("complainant OTP login (§8 decision 4)", () => {
-  it("an address with no complaints gets the same answer, no email, and no stored code", async () => {
-    await submitAs("ada.aduan@contoh.my");
-    const known = await requestCode("ada.aduan@contoh.my");
-    const unknown = await requestCode("tiada.aduan@contoh.my");
-
-    assert.equal(known.status, 202);
-    assert.equal(unknown.status, 202);
-    assert.deepEqual(unknown.body, known.body);
-    assert.equal(codesSentTo("ada.aduan@contoh.my").length, 1);
-    assert.equal(
-      ctx.emails.filter((m) => m.to === "tiada.aduan@contoh.my").length,
-      0,
-    );
-    assert.equal(
-      await countRows(
-        "SELECT count(*)::int AS n FROM complainant_otp_codes WHERE email = $1",
-        ["tiada.aduan@contoh.my"],
-      ),
-      0,
-    );
-  });
-
-  it("emails a 6-digit code, stores only a hash, signs in once; reusing the code is refused", async () => {
-    const email = "log.masuk@contoh.my";
-    await submitAs(email);
-    expectStatus(await requestCode(email), 202);
-    const [code] = codesSentTo(email);
-    assert.match(code!, /^\d{6}$/);
-
-    const { rows } = await ctx.sql<{ code_hash: string }>(
-      "SELECT code_hash FROM complainant_otp_codes WHERE email = $1",
-      [email],
-    );
-    assert.ok(rows[0]!.code_hash.startsWith("scrypt$"));
-    assert.ok(!rows[0]!.code_hash.includes(code!));
-
-    assert.equal((await verify(email, wrong(code!))).status, 401);
-
-    const ok = await verify(email, code!);
-    assert.equal(ok.status, 200);
-    const setCookie = ok.headers.getSetCookie().join("\n");
-    assert.match(setCookie, /aduan_csid=/);
-    assert.match(setCookie, /HttpOnly/i);
-    assert.doesNotMatch(setCookie, /aduan_sid=/);
-
-    const client = ctx.withCookie(
-      ok.headers
-        .getSetCookie()
-        .map((c) => c.split(";")[0])
-        .join("; "),
-    );
-    const me = expectStatus<{ email: string }>(
-      await client.get("/complainant/auth/me"),
-      200,
-    );
-    assert.equal(me.email, email);
-
-    const reused = await verify(email, code!);
-    assert.equal(reused.status, 401, "a consumed code must not sign in again");
-  });
-
-  it("attempt limit: after 5 wrong guesses even the right code is refused", async () => {
-    const email = "had.cubaan@contoh.my";
-    await submitAs(email);
-    expectStatus(await requestCode(email), 202);
-    const [code] = codesSentTo(email);
-
-    for (let i = 0; i < 5; i += 1) {
-      assert.equal((await verify(email, wrong(code!))).status, 401);
-    }
-    assert.equal(
-      await countRows(
-        "SELECT attempt_count AS n FROM complainant_otp_codes WHERE email = $1",
-        [email],
-      ),
-      5,
-    );
-
-    const right = await verify(email, code!);
-    assert.equal(right.status, 401);
-    const wrongBody = await (await verify(email, wrong(code!))).json();
-    assert.deepEqual(
-      await right.json(),
-      wrongBody,
-      "exhausted and wrong look identical",
-    );
-  });
-
-  it("an expired code is refused", async () => {
-    const email = "tamat.tempoh@contoh.my";
-    await submitAs(email);
-    expectStatus(await requestCode(email), 202);
-    const [code] = codesSentTo(email);
-
-    await ctx.sql(
-      `UPDATE complainant_otp_codes
-          SET created_at = now() - INTERVAL '11 minutes',
-              expires_at = now() - INTERVAL '1 minute'
-        WHERE email = $1`,
-      [email],
-    );
-    assert.equal((await verify(email, code!)).status, 401);
-  });
-
-  it("re-requesting inside the cooldown sends nothing; a newer code supersedes the older one", async () => {
-    const email = "kod.baharu@contoh.my";
-    await submitAs(email);
-    expectStatus(await requestCode(email), 202);
-    expectStatus(await requestCode(email), 202);
-    assert.equal(
-      codesSentTo(email).length,
-      1,
-      "throttled request sends nothing",
-    );
-
-    await ctx.sql(
-      `UPDATE complainant_otp_codes SET created_at = now() - INTERVAL '2 minutes'
-        WHERE email = $1`,
-      [email],
-    );
-    expectStatus(await requestCode(email), 202);
-    const [first, second] = codesSentTo(email);
-    assert.ok(first && second);
-
-    if (first !== second) {
-      assert.equal(await verify(email, first).then((r) => r.status), 401);
-    }
-    assert.equal(await verify(email, second).then((r) => r.status), 200);
-  });
-
-  it("matches the email case-insensitively", async () => {
-    await submitAs("huruf.besar@contoh.my");
-    const client = await ctx.complainant("HURUF.Besar@Contoh.MY");
-    const me = expectStatus<{ email: string }>(
-      await client.get("/complainant/auth/me"),
-      200,
-    );
-    assert.equal(me.email, "huruf.besar@contoh.my");
-  });
-
-  it("logout and idle timeout end the session; staff and complainant cookies don't cross", async () => {
-    const email = "keluar@contoh.my";
-    await submitAs(email);
-
-    const client = await ctx.complainant(email);
-    expectStatus(await client.get("/complainant/auth/me"), 200);
-    assert.equal((await client.post("/complainant/auth/logout")).status, 204);
-    assert.equal((await client.get("/complainant/auth/me")).status, 401);
-    assert.equal(
-      await countRows(
-        "SELECT count(*)::int AS n FROM complainant_sessions WHERE email = $1",
-        [email],
-      ),
-      0,
-    );
-
-    await ctx.sql(
-      `UPDATE complainant_otp_codes SET created_at = now() - INTERVAL '2 minutes' WHERE email = $1`,
-      [email],
-    );
-    const idle = await ctx.complainant(email);
-    await ctx.sql(
-      `UPDATE complainant_sessions SET last_seen_at = now() - INTERVAL '31 minutes' WHERE email = $1`,
-      [email],
-    );
-    assert.equal((await idle.get("/complainant/auth/me")).status, 401);
-
-    await ctx.sql(
-      `UPDATE complainant_otp_codes SET created_at = now() - INTERVAL '2 minutes' WHERE email = $1`,
-      [email],
-    );
-    const fresh = await ctx.complainant(email);
-    assert.equal((await kui.get("/complainant/complaints")).status, 401);
-    assert.equal((await fresh.get("/admin/complaints")).status, 401);
-    assert.equal((await fresh.get("/auth/me")).status, 401);
-  });
-});
-
 describe("my complaints (rules 2 and 9)", () => {
   const A = "pengadu.a@contoh.my";
   const B = "pengadu.b@contoh.my";
@@ -684,7 +483,7 @@ describe("my complaints (rules 2 and 9)", () => {
     );
   });
 
-  it("a re-tabled NFA case stays hidden, and an address whose only case is NFA gets no code", async () => {
+  it("a re-tabled NFA case stays hidden", async () => {
     const meeting = expectStatus<{ id: string }>(
       await kui.post("/admin/jmm/meetings", {
         meetingNo: "JMM Portal 1/2026",
@@ -712,12 +511,6 @@ describe("my complaints (rules 2 and 9)", () => {
       ).status,
       404,
     );
-
-    const onlyNfa = "hanya.nfa@contoh.my";
-    const c = await submitAs(onlyNfa);
-    await decide(c.complaintRefNo, "NFA");
-    expectStatus(await requestCode(onlyNfa), 202);
-    assert.equal(codesSentTo(onlyNfa).length, 0);
   });
 });
 
@@ -793,17 +586,15 @@ describe("protection requests (§8 decision 6)", () => {
       ).status,
       422,
     );
-    for (const client of [ctx.anonymous, kui]) {
-      assert.equal(
-        (
-          await client.post("/complainant/protection-requests", {
-            complaintRefNo: a1.complaintRefNo,
-            reason: REASON,
-          })
-        ).status,
-        401,
-      );
-    }
+    const fileAs = (client: Client) =>
+      client.post("/complainant/protection-requests", {
+        complaintRefNo: a1.complaintRefNo,
+        reason: REASON,
+      });
+    assert.equal((await fileAs(ctx.anonymous)).status, 401);
+    // One sign-in for everybody (§8 decision 15): a staff session is a valid
+    // portal session, but the complaint isn't theirs.
+    assert.equal((await fileAs(kui)).status, 404);
 
     const listA = expectStatus<ProtectionRequest[]>(
       await clientA.get("/complainant/protection-requests"),
@@ -841,7 +632,8 @@ describe("protection requests (§8 decision 6)", () => {
       (await ctx.anonymous.get("/admin/protection-requests")).status,
       401,
     );
-    assert.equal((await clientA.get("/admin/protection-requests")).status, 401);
+    // Signed in as PENGADU, without the permission: 403, not 401.
+    assert.equal((await clientA.get("/admin/protection-requests")).status, 403);
 
     const pending = expectStatus<ProtectionRequest[]>(
       await kui.get("/admin/protection-requests?status=DITERIMA"),

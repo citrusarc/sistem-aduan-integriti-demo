@@ -9,13 +9,17 @@ import type { StaffRole } from "../types/enums.js";
  * Credential and session queries. The only module that reads `password_hash`
  * or `staff_sessions` — general staff queries in db/queries/staffUsers.ts never
  * select them, so a hash cannot ride along into an API response.
+ *
+ * `staff_users` is the one account table for staff and complainants alike
+ * (role PENGADU) since §8 decision 15; the name predates that.
  */
 
-export type AuthenticatedStaff = {
+export type AuthenticatedUser = {
   id: string;
   email: string;
   fullName: string;
   role: StaffRole;
+  sessionExpiresAt: Date;
 };
 
 type CredentialRow = {
@@ -27,6 +31,8 @@ type CredentialRow = {
   password_hash: string | null;
   failed_login_count: number;
   locked_until: Date | null;
+  /** NULL until the code emailed at self-registration is entered (§8 decision 15). */
+  email_verified_at: Date | null;
   /** §8 decision 14: ADMIN-set password, or older than the expiry period. */
   password_change_required?: boolean;
 };
@@ -43,7 +49,7 @@ export async function getCredentialsByEmail(
 ): Promise<CredentialRow | undefined> {
   return queryOne<CredentialRow>(
     `SELECT id, email, full_name, role, is_active, password_hash,
-            failed_login_count, locked_until,
+            failed_login_count, locked_until, email_verified_at,
             ${PASSWORD_CHANGE_REQUIRED_SQL} AS password_change_required
        FROM staff_users
       WHERE lower(email) = lower($1)`,
@@ -117,7 +123,7 @@ export async function updateSecuritySettings(
 // ─── Sign-in challenges — §8 decision 14 (a), (c), (l) ──────────────────────
 
 export type AuthChallengePurpose =
-  "LOGIN_MFA" | "PASSWORD_CHANGE" | "PASSWORD_RESET";
+  "LOGIN_MFA" | "PASSWORD_CHANGE" | "PASSWORD_RESET" | "REGISTER";
 
 export const STAFF_CODE_DIGITS = 6;
 const CODE_MAX_ATTEMPTS = 5;
@@ -258,7 +264,7 @@ export async function getCredentialsById(
 ): Promise<CredentialRow | undefined> {
   return queryOne<CredentialRow>(
     `SELECT id, email, full_name, role, is_active, password_hash,
-            failed_login_count, locked_until,
+            failed_login_count, locked_until, email_verified_at,
             ${PASSWORD_CHANGE_REQUIRED_SQL} AS password_change_required
        FROM staff_users
       WHERE id = $1`,
@@ -322,12 +328,13 @@ export async function createSession(input: {
 export async function resolveSession(
   token: string,
   idleTimeoutMinutes: number,
-): Promise<AuthenticatedStaff | undefined> {
+): Promise<AuthenticatedUser | undefined> {
   const row = await queryOne<{
     id: string;
     email: string;
     full_name: string;
     role: StaffRole;
+    expires_at: Date;
   }>(
     `UPDATE staff_sessions s
         SET last_seen_at = now()
@@ -337,7 +344,7 @@ export async function resolveSession(
         AND u.is_active
         AND s.expires_at > now()
         AND s.last_seen_at > now() - ($2::int * INTERVAL '1 minute')
-      RETURNING u.id, u.email, u.full_name, u.role`,
+      RETURNING u.id, u.email, u.full_name, u.role, s.expires_at`,
     [hashToken(token), idleTimeoutMinutes],
   );
 
@@ -347,6 +354,7 @@ export async function resolveSession(
     email: row.email,
     fullName: row.full_name,
     role: row.role,
+    sessionExpiresAt: row.expires_at,
   };
 }
 
@@ -377,7 +385,10 @@ export async function setPassword(
       `UPDATE staff_users
           SET password_hash = $2, password_changed_at = now(),
               failed_login_count = 0, locked_until = NULL,
-              must_change_password = $3
+              must_change_password = $3,
+              -- Every caller has proven the address or vouches for it: an
+              -- emailed reset code, a signed-in owner, or ADMIN.
+              email_verified_at = COALESCE(email_verified_at, now())
         WHERE id = $1`,
       [staffId, passwordHash, mustChange],
     );
@@ -403,6 +414,7 @@ export type StaffAccountRow = {
   locked: boolean;
   must_change_password: boolean;
   password_expired: boolean;
+  email_verified: boolean;
   last_login_at: Date | null;
   password_changed_at: Date | null;
   created_at: Date;
@@ -413,6 +425,7 @@ const ACCOUNT_COLUMNS = `
   password_hash IS NOT NULL AS has_password,
   COALESCE(locked_until > now(), FALSE) AS locked,
   must_change_password,
+  email_verified_at IS NOT NULL AS email_verified,
   (password_changed_at IS NULL
      OR password_changed_at < now() - (SELECT password_max_age_days FROM security_settings) * INTERVAL '1 day') AS password_expired,
   last_login_at, password_changed_at, created_at
@@ -455,8 +468,9 @@ export async function createStaffAccount(input: {
 }): Promise<StaffAccountRow> {
   try {
     const row = await queryOne<StaffAccountRow>(
-      `INSERT INTO staff_users (full_name, role, email, password_hash, password_changed_at, must_change_password)
-       VALUES ($1, $2, $3, $4, now(), $5)
+      `INSERT INTO staff_users (full_name, role, email, password_hash, password_changed_at,
+                                must_change_password, email_verified_at)
+       VALUES ($1, $2, $3, $4, now(), $5, now())
        RETURNING ${ACCOUNT_COLUMNS}`,
       [
         input.fullName,
@@ -565,52 +579,105 @@ export async function setStaffActive(
   });
 }
 
-/** §8 decision 13: first-run setup is open only while this is true. */
-export async function hasNoStaffAccounts(): Promise<boolean> {
-  const row = await queryOne<{ empty: boolean }>(
-    `SELECT NOT EXISTS (SELECT 1 FROM staff_users) AS empty`,
-  );
-  return row?.empty ?? false;
-}
+// ─── Self-registration — §8 decision 15 ─────────────────────────────────────
+
+export type RegistrationResult =
+  /** A new or still-unverified account: a code goes to the address. */
+  | { state: "pending"; id: string }
+  /** The address already has a verified account. Nothing about it changes. */
+  | { state: "exists"; id: string };
 
 /**
- * First-run setup (§8 decision 13): creates the first ADMIN, and only while no
- * staff account exists at all. The check and the insert share an advisory
- * lock, so two simultaneous setups can't both succeed; afterwards every
- * account is created by an ADMIN (or the CLI).
+ * Records a sign-up as an unverified PENGADU account. Re-registering an
+ * unverified address replaces its name and password (whoever proves the
+ * address with the emailed code owns it); a verified account is never touched,
+ * so typing someone else's email changes nothing of theirs. Serialised per
+ * address so two sign-ups can't both insert.
  */
-export async function createFirstAdmin(input: {
+export async function registerAccount(input: {
   email: string;
   fullName: string;
   passwordHash: string;
-}): Promise<CredentialRow> {
-  try {
-    return await withTransaction(async (client) => {
+}): Promise<RegistrationResult> {
+  return withTransaction(async (client) => {
+    await client.query("SELECT pg_advisory_xact_lock(hashtext($1))", [
+      `register:${input.email.toLowerCase()}`,
+    ]);
+    // Sign-ups nobody confirmed within a day are dropped. Only PENGADU rows
+    // are ever unverified; the role check keeps it that way.
+    await client.query(
+      `DELETE FROM staff_users
+        WHERE email_verified_at IS NULL AND role = 'PENGADU'
+          AND created_at < now() - INTERVAL '1 day'`,
+    );
+
+    const existing = await client.query<{
+      id: string;
+      email_verified_at: Date | null;
+    }>(
+      `SELECT id, email_verified_at FROM staff_users
+        WHERE lower(email) = lower($1) FOR UPDATE`,
+      [input.email],
+    );
+    const row = existing.rows[0];
+    if (row?.email_verified_at) return { state: "exists", id: row.id };
+
+    if (row) {
       await client.query(
-        "SELECT pg_advisory_xact_lock(hashtext('staff:first-run-setup'))",
+        `UPDATE staff_users
+            SET full_name = $2, password_hash = $3, password_changed_at = now(),
+                failed_login_count = 0, locked_until = NULL
+          WHERE id = $1`,
+        [row.id, input.fullName, input.passwordHash],
       );
-      const existing = await client.query(`SELECT 1 FROM staff_users LIMIT 1`);
-      if (existing.rowCount) {
-        throw new DomainError(
-          409,
-          "Persediaan awal telah selesai. Log masuk, atau minta ADMIN mencipta akaun anda.",
-        );
-      }
-      const inserted = await client.query<CredentialRow>(
-        `INSERT INTO staff_users (full_name, role, email, password_hash, password_changed_at)
-         VALUES ($1, 'ADMIN', $2, $3, now())
-         RETURNING id, email, full_name, role, is_active, password_hash,
-                   failed_login_count, locked_until`,
-        [input.fullName, input.email, input.passwordHash],
-      );
-      const row = inserted.rows[0];
-      if (!row) throw new Error("Gagal mencipta akaun ADMIN");
-      return row;
-    });
-  } catch (err) {
-    if (isUniqueViolation(err)) {
-      throw new DomainError(409, "E-mel ini sudah digunakan oleh akaun lain");
+      return { state: "pending", id: row.id };
     }
-    throw err;
-  }
+
+    const inserted = await client.query<{ id: string }>(
+      `INSERT INTO staff_users (full_name, role, email, password_hash,
+                                password_changed_at, email_verified_at)
+       VALUES ($1, 'PENGADU', $2, $3, now(), NULL)
+       RETURNING id`,
+      [input.fullName, input.email.toLowerCase(), input.passwordHash],
+    );
+    return { state: "pending", id: inserted.rows[0]!.id };
+  });
+}
+
+export async function markEmailVerified(id: string): Promise<void> {
+  await query(
+    `UPDATE staff_users SET email_verified_at = COALESCE(email_verified_at, now())
+      WHERE id = $1`,
+    [id],
+  );
+}
+
+/**
+ * §8 decision 15: the first ADMIN is whoever proves INITIAL_ADMIN_EMAIL —
+ * by the registration code or a login code — while no active ADMIN exists.
+ * After that, ADMIN assigns every role. Serialised with an advisory lock so
+ * the check and the promotion can't interleave. Returns true if promoted.
+ */
+export async function promoteInitialAdmin(
+  id: string,
+  initialAdminEmail: string | null,
+): Promise<boolean> {
+  if (!initialAdminEmail) return false;
+  return withTransaction(async (client) => {
+    await client.query(
+      "SELECT pg_advisory_xact_lock(hashtext('accounts:initial-admin'))",
+    );
+    const result = await client.query(
+      `UPDATE staff_users SET role = 'ADMIN'
+        WHERE id = $1
+          AND lower(email) = lower($2)
+          AND is_active
+          AND email_verified_at IS NOT NULL
+          AND NOT EXISTS (
+                SELECT 1 FROM staff_users WHERE role = 'ADMIN' AND is_active
+              )`,
+      [id, initialAdminEmail],
+    );
+    return (result.rowCount ?? 0) > 0;
+  });
 }
